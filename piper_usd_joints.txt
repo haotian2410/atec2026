@@ -1,0 +1,674 @@
+USD: /home/cscvlab/lht/ATEC2026_Simulation_Challenge/atec_robot_model/robot/piper/piper.usd
+
+==================== ALL JOINT-LIKE PRIMS ====================
+
+====================================================================================================
+prim path: /piper/joints
+name     : joints
+type     : Scope
+
+Attributes:
+  purpose: default
+  visibility: inherited
+
+Relationships:
+  proxyPrim: []
+
+====================================================================================================
+prim path: /piper/joints/base_to_dummy
+name     : base_to_dummy
+type     : PhysicsFixedJoint
+
+Attributes:
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.0
+  physics:localPos0: (0, 0, 0)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (1, 0, 0, 0)
+  physics:localRot1: (1, 0, 0, 0)
+  purpose: default
+  visibility: inherited
+
+Relationships:
+  physics:body0: [Sdf.Path('/piper/dummy_link')]
+  physics:body1: [Sdf.Path('/piper/base_link')]
+  proxyPrim: []
+
+====================================================================================================
+prim path: /piper/joints/joint1
+name     : joint1
+type     : PhysicsRevoluteJoint
+
+Attributes:
+  drive:angular:physics:damping: 0.01745329238474369
+  drive:angular:physics:maxForce: 100.0
+  drive:angular:physics:stiffness: 1.7453292608261108
+  drive:angular:physics:targetPosition: 0.0
+  drive:angular:physics:targetVelocity: 0.0
+  drive:angular:physics:type: force
+  physics:axis: Z
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.012992467731237411
+  physics:localPos0: (0, 0, 0.123)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (1, 0, 0, 0)
+  physics:localRot1: (1, 0, 0, 0)
+  physics:lowerLimit: -150.00035095214844
+  physics:upperLimit: 124.21723937988281
+  physxJoint:maxJointVelocity: 286.4788818359375
+  purpose: default
+  visibility: inherited
+
+Relationships:
+  physics:body0: [Sdf.Path('/piper/base_link')]
+  physics:body1: [Sdf.Path('/piper/link1')]
+  proxyPrim: []
+
+====================================================================================================
+prim path: /piper/joints/joint2
+name     : joint2
+type     : PhysicsRevoluteJoint
+
+Attributes:
+  drive:angular:physics:damping: 0.01745329238474369
+  drive:angular:physics:maxForce: 100.0
+  drive:angular:physics:stiffness: 1.7453292608261108
+  drive:angular:physics:targetPosition: 0.0
+  drive:angular:physics:targetVelocity: 0.0
+  drive:angular:physics:type: force
+  physics:axis: Z
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.025270478799939156
+  physics:localPos0: (0, 0, 0)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (0.04800847, -0.048013408, -0.7054761, -0.7054739)
+  physics:localRot1: (1, 0, 0, 0)
+  physics:lowerLimit: 0.0
+  physics:upperLimit: 179.9087371826172
+  physxJoint:maxJointVelocity: 286.4788818359375
+  purpose: default
+  visibility: inherited
+
+Relationships:
+  physics:body0: [Sdf.Path('/piper/link1')]
+  physics:body1: [Sdf.Path('/piper/link2')]
+  proxyPrim: []
+
+====================================================================================================
+prim path: /piper/joints/joint3
+name     : joint3
+type     : PhysicsRevoluteJoint
+
+Attributes:
+  drive:angular:physics:damping: 0.01745329238474369
+  drive:angular:physics:maxForce: 100.0
+  drive:angular:physics:stiffness: 1.7453292608261108
+  drive:angular:physics:targetPosition: 0.0
+  drive:angular:physics:targetVelocity: 0.0
+  drive:angular:physics:type: force
+  physics:axis: Z
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.049597762525081635
+  physics:localPos0: (0.28503, 0, 0)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (0.6239962, 0, 0, -0.7814274)
+  physics:localRot1: (1, 0, 0, 0)
+  physics:lowerLimit: -169.99656677246094
+  physics:upperLimit: 0.0
+  physxJoint:maxJointVelocity: 286.4788818359375
+  purpose: default
+  visibility: inherited
+
+Relationships:
+  physics:body0: [Sdf.Path('/piper/link2')]
+  physics:body1: [Sdf.Path('/piper/link3')]
+  proxyPrim: []
+
+====================================================================================================
+prim path: /piper/joints/joint4
+name     : joint4
+type     : PhysicsRevoluteJoint
+
+Attributes:
+  drive:angular:physics:damping: 0.01745329238474369
+  drive:angular:physics:maxForce: 100.0
+  drive:angular:physics:stiffness: 1.7453292608261108
+  drive:angular:physics:targetPosition: 0.0
+  drive:angular:physics:targetVelocity: 0.0
+  drive:angular:physics:type: force
+  physics:axis: Z
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.14631834626197815
+  physics:localPos0: (-0.021984, -0.25075, 0)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (0.7071055, 0.7071081, 0, 0)
+  physics:localRot1: (1, 0, 0, 0)
+  physics:lowerLimit: -99.98113250732422
+  physics:upperLimit: 99.98113250732422
+  physxJoint:maxJointVelocity: 286.4788818359375
+  purpose: default
+  visibility: inherited
+
+Relationships:
+  physics:body0: [Sdf.Path('/piper/link3')]
+  physics:body1: [Sdf.Path('/piper/link4')]
+  proxyPrim: []
+
+====================================================================================================
+prim path: /piper/joints/joint5
+name     : joint5
+type     : PhysicsRevoluteJoint
+
+Attributes:
+  drive:angular:physics:damping: 0.01745329238474369
+  drive:angular:physics:maxForce: 100.0
+  drive:angular:physics:stiffness: 1.7453292608261108
+  drive:angular:physics:targetPosition: 0.0
+  drive:angular:physics:targetVelocity: 0.0
+  drive:angular:physics:type: force
+  physics:axis: Z
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.016076963394880295
+  physics:localPos0: (0, 0, 0)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (0.7071055, -0.7071081, 0, 0)
+  physics:localRot1: (1, 0, 0, 0)
+  physics:lowerLimit: -69.90084838867188
+  physics:upperLimit: 69.90084838867188
+  physxJoint:maxJointVelocity: 286.4788818359375
+  purpose: default
+  visibility: inherited
+
+Relationships:
+  physics:body0: [Sdf.Path('/piper/link4')]
+  physics:body1: [Sdf.Path('/piper/link5')]
+  proxyPrim: []
+
+====================================================================================================
+prim path: /piper/joints/joint6
+name     : joint6
+type     : PhysicsRevoluteJoint
+
+Attributes:
+  drive:angular:physics:damping: 0.01745329238474369
+  drive:angular:physics:maxForce: 100.0
+  drive:angular:physics:stiffness: 1.7453292608261108
+  drive:angular:physics:targetPosition: 0.0
+  drive:angular:physics:targetVelocity: 0.0
+  drive:angular:physics:type: force
+  physics:axis: Z
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.012935088016092777
+  physics:localPos0: (0.000088259, -0.091, 0)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (0.7071055, 0.7071081, 0, 0)
+  physics:localRot1: (1, 0, 0, 0)
+  physics:lowerLimit: -120.0002670288086
+  physics:upperLimit: 120.0002670288086
+  physxJoint:maxJointVelocity: 171.8873291015625
+  purpose: default
+  visibility: inherited
+
+Relationships:
+  physics:body0: [Sdf.Path('/piper/link5')]
+  physics:body1: [Sdf.Path('/piper/link6')]
+  proxyPrim: []
+
+====================================================================================================
+prim path: /piper/joints/joint6_to_gripper_base
+name     : joint6_to_gripper_base
+type     : PhysicsFixedJoint
+
+Attributes:
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.0025340260472148657
+  physics:localPos0: (0, 0, 0)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (1, 0, 0, 0)
+  physics:localRot1: (1, 0, 0, 0)
+  purpose: default
+  visibility: inherited
+
+Relationships:
+  physics:body0: [Sdf.Path('/piper/link6')]
+  physics:body1: [Sdf.Path('/piper/gripper_base')]
+  proxyPrim: []
+
+====================================================================================================
+prim path: /piper/joints/joint7
+name     : joint7
+type     : PhysicsPrismaticJoint
+
+Attributes:
+  drive:linear:physics:damping: 1.0
+  drive:linear:physics:maxForce: 10.0
+  drive:linear:physics:stiffness: 100.0
+  drive:linear:physics:targetPosition: 0.0
+  drive:linear:physics:targetVelocity: 0.0
+  drive:linear:physics:type: force
+  physics:axis: Z
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.00033699339837767184
+  physics:localPos0: (0, 0, 0.1358)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (0.7071055, 0.7071081, 0, 0)
+  physics:localRot1: (1, 0, 0, 0)
+  physics:lowerLimit: 0.0
+  physics:upperLimit: 0.03500000014901161
+  physxJoint:maxJointVelocity: 1.0
+  purpose: default
+  visibility: inherited
+
+Relationships:
+  physics:body0: [Sdf.Path('/piper/gripper_base')]
+  physics:body1: [Sdf.Path('/piper/link7')]
+  proxyPrim: []
+
+====================================================================================================
+prim path: /piper/joints/joint8
+name     : joint8
+type     : PhysicsPrismaticJoint
+
+Attributes:
+  drive:linear:physics:damping: 1.0
+  drive:linear:physics:maxForce: 10.0
+  drive:linear:physics:stiffness: 100.0
+  drive:linear:physics:targetPosition: 0.0
+  drive:linear:physics:targetVelocity: 0.0
+  drive:linear:physics:type: force
+  physics:axis: Z
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.00034046717337332666
+  physics:localPos0: (0, 0, 0.1358)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (0.7071081, 0.7071055, -0.000002559715, -0.0000025597242)
+  physics:localRot1: (0, 0, 1, 0)
+  physics:lowerLimit: -0.03500000014901161
+  physics:upperLimit: 0.0
+  physxJoint:maxJointVelocity: 1.0
+  purpose: default
+  visibility: inherited
+
+Relationships:
+  physics:body0: [Sdf.Path('/piper/gripper_base')]
+  physics:body1: [Sdf.Path('/piper/link8')]
+  proxyPrim: []
+
+====================================================================================================
+prim path: /piper/root_joint
+name     : root_joint
+type     : PhysicsFixedJoint
+
+Attributes:
+  physics:breakForce: inf
+  physics:breakTorque: inf
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:localPos0: (0, 0, 0)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (1, 0, 0, 0)
+  physics:localRot1: (1, 0, 0, 0)
+  physxArticulation:enabledSelfCollisions: False
+  physxArticulation:solverPositionIterationCount: 32
+  physxArticulation:solverVelocityIterationCount: 1
+  purpose: default
+  visibility: inherited
+
+Relationships:
+  physics:body0: []
+  physics:body1: [Sdf.Path('/piper/dummy_link')]
+  proxyPrim: []
+
+
+==================== IMPORTANT LINKS / EE ====================
+
+====================================================================================================
+prim path: /piper/joints/joint6
+name     : joint6
+type     : PhysicsRevoluteJoint
+  drive:angular:physics:damping: 0.01745329238474369
+  drive:angular:physics:maxForce: 100.0
+  drive:angular:physics:stiffness: 1.7453292608261108
+  drive:angular:physics:targetPosition: 0.0
+  drive:angular:physics:targetVelocity: 0.0
+  drive:angular:physics:type: force
+  physics:axis: Z
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.012935088016092777
+  physics:localPos0: (0.000088259, -0.091, 0)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (0.7071055, 0.7071081, 0, 0)
+  physics:localRot1: (1, 0, 0, 0)
+  physics:lowerLimit: -120.0002670288086
+  physics:upperLimit: 120.0002670288086
+  REL physics:body0: [Sdf.Path('/piper/link5')]
+  REL physics:body1: [Sdf.Path('/piper/link6')]
+  REL proxyPrim: []
+
+====================================================================================================
+prim path: /piper/joints/joint6_to_gripper_base
+name     : joint6_to_gripper_base
+type     : PhysicsFixedJoint
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.0025340260472148657
+  physics:localPos0: (0, 0, 0)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (1, 0, 0, 0)
+  physics:localRot1: (1, 0, 0, 0)
+  REL physics:body0: [Sdf.Path('/piper/link6')]
+  REL physics:body1: [Sdf.Path('/piper/gripper_base')]
+  REL proxyPrim: []
+
+====================================================================================================
+prim path: /piper/joints/joint7
+name     : joint7
+type     : PhysicsPrismaticJoint
+  drive:linear:physics:damping: 1.0
+  drive:linear:physics:maxForce: 10.0
+  drive:linear:physics:stiffness: 100.0
+  drive:linear:physics:targetPosition: 0.0
+  drive:linear:physics:targetVelocity: 0.0
+  drive:linear:physics:type: force
+  physics:axis: Z
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.00033699339837767184
+  physics:localPos0: (0, 0, 0.1358)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (0.7071055, 0.7071081, 0, 0)
+  physics:localRot1: (1, 0, 0, 0)
+  physics:lowerLimit: 0.0
+  physics:upperLimit: 0.03500000014901161
+  REL physics:body0: [Sdf.Path('/piper/gripper_base')]
+  REL physics:body1: [Sdf.Path('/piper/link7')]
+  REL proxyPrim: []
+
+====================================================================================================
+prim path: /piper/joints/joint8
+name     : joint8
+type     : PhysicsPrismaticJoint
+  drive:linear:physics:damping: 1.0
+  drive:linear:physics:maxForce: 10.0
+  drive:linear:physics:stiffness: 100.0
+  drive:linear:physics:targetPosition: 0.0
+  drive:linear:physics:targetVelocity: 0.0
+  drive:linear:physics:type: force
+  physics:axis: Z
+  physics:breakForce: 3.4028234663852886e+38
+  physics:breakTorque: 3.4028234663852886e+38
+  physics:collisionEnabled: False
+  physics:excludeFromArticulation: False
+  physics:jointEnabled: True
+  physics:JointEquivalentInertia: 0.00034046717337332666
+  physics:localPos0: (0, 0, 0.1358)
+  physics:localPos1: (0, 0, 0)
+  physics:localRot0: (0.7071081, 0.7071055, -0.000002559715, -0.0000025597242)
+  physics:localRot1: (0, 0, 1, 0)
+  physics:lowerLimit: -0.03500000014901161
+  physics:upperLimit: 0.0
+  REL physics:body0: [Sdf.Path('/piper/gripper_base')]
+  REL physics:body1: [Sdf.Path('/piper/link8')]
+  REL proxyPrim: []
+
+====================================================================================================
+prim path: /piper/link6
+name     : link6
+type     : Xform
+  physics:angularVelocity: (0, 0, 0)
+  physics:centerOfMass: (-0.000088259076, 0.000009059838, -0.002)
+  physics:density: 0.0
+  physics:diagonalInertia: (5.7301554e-7, 5.7301554e-7, 0.0000010673887)
+  physics:kinematicEnabled: False
+  physics:mass: 0.006990896072238684
+  physics:principalAxes: (0.92387956, 0, 0, 0.38268343)
+  physics:rigidBodyEnabled: True
+  physics:startsAsleep: False
+  physics:velocity: (0, 0, 0)
+  xformOp:orient: (-0.7372562885284424, -0.0000022649765014648438, -0.6756133437156677, 0.000004887580871582031)
+  xformOp:scale: (1, 1, 1)
+  xformOp:translate: (0.05614253133535385, -5.960464477539063e-8, 0.2131931334733963)
+  xformOpOrder: [xformOp:translate, xformOp:orient, xformOp:scale]
+  REL physics:simulationOwner: []
+  REL proxyPrim: []
+
+====================================================================================================
+prim path: /piper/link6/visuals
+name     : visuals
+type     : Xform
+  xformOpOrder: None
+  REL proxyPrim: []
+
+====================================================================================================
+prim path: /piper/link6/collisions
+name     : collisions
+type     : Xform
+  physics:approximation: convexHull
+  physics:collisionEnabled: True
+  xformOpOrder: None
+  REL collection:collisionmeshes:includes: [Sdf.Path('/piper/link6/collisions')]
+  REL physics:simulationOwner: []
+  REL proxyPrim: []
+
+====================================================================================================
+prim path: /piper/gripper_base
+name     : gripper_base
+type     : Xform
+  physics:angularVelocity: (0, 0, 0)
+  physics:centerOfMass: (-0.00018380716, 0.00008050331, 0.032143667)
+  physics:density: 0.0
+  physics:diagonalInertia: (0.00092944235, 0.00071446947, 0.0003943182)
+  physics:kinematicEnabled: False
+  physics:mass: 0.44999998807907104
+  physics:principalAxes: (0.9999759, 0.0000908445, 0.006896408, 0.00078851206)
+  physics:rigidBodyEnabled: True
+  physics:startsAsleep: False
+  physics:velocity: (0, 0, 0)
+  xformOp:orient: (-0.7372562885284424, -0.0000022649765014648438, -0.6756133437156677, 0.000004887580871582031)
+  xformOp:scale: (1, 1, 1)
+  xformOp:translate: (0.05614253133535385, -5.960464477539063e-8, 0.2131931334733963)
+  xformOpOrder: [xformOp:translate, xformOp:orient, xformOp:scale]
+  REL physics:simulationOwner: []
+  REL proxyPrim: []
+
+====================================================================================================
+prim path: /piper/gripper_base/visuals
+name     : visuals
+type     : Xform
+  xformOpOrder: None
+  REL proxyPrim: []
+
+====================================================================================================
+prim path: /piper/gripper_base/collisions
+name     : collisions
+type     : Xform
+  physics:approximation: convexHull
+  physics:collisionEnabled: True
+  xformOpOrder: None
+  REL collection:collisionmeshes:includes: [Sdf.Path('/piper/gripper_base/collisions')]
+  REL physics:simulationOwner: []
+  REL proxyPrim: []
+
+
+==================== SUMMARY CANDIDATE JOINT DATA ====================
+
+--------------------------------------------------------------------------------
+name: joint1
+path: /piper/joints/joint1
+type: PhysicsRevoluteJoint
+physics:axis: Z
+physics:localPos0: (0, 0, 0.123)
+physics:localRot0: (1, 0, 0, 0)
+physics:localPos1: (0, 0, 0)
+physics:localRot1: (1, 0, 0, 0)
+physics:lowerLimit: -150.00035095214844
+physics:upperLimit: 124.21723937988281
+drive:angular:physics:targetPosition: 0.0
+drive:angular:physics:stiffness: 1.7453292608261108
+drive:angular:physics:damping: 0.01745329238474369
+physics:body0: [Sdf.Path('/piper/base_link')]
+physics:body1: [Sdf.Path('/piper/link1')]
+
+--------------------------------------------------------------------------------
+name: joint2
+path: /piper/joints/joint2
+type: PhysicsRevoluteJoint
+physics:axis: Z
+physics:localPos0: (0, 0, 0)
+physics:localRot0: (0.04800847, -0.048013408, -0.7054761, -0.7054739)
+physics:localPos1: (0, 0, 0)
+physics:localRot1: (1, 0, 0, 0)
+physics:lowerLimit: 0.0
+physics:upperLimit: 179.9087371826172
+drive:angular:physics:targetPosition: 0.0
+drive:angular:physics:stiffness: 1.7453292608261108
+drive:angular:physics:damping: 0.01745329238474369
+physics:body0: [Sdf.Path('/piper/link1')]
+physics:body1: [Sdf.Path('/piper/link2')]
+
+--------------------------------------------------------------------------------
+name: joint3
+path: /piper/joints/joint3
+type: PhysicsRevoluteJoint
+physics:axis: Z
+physics:localPos0: (0.28503, 0, 0)
+physics:localRot0: (0.6239962, 0, 0, -0.7814274)
+physics:localPos1: (0, 0, 0)
+physics:localRot1: (1, 0, 0, 0)
+physics:lowerLimit: -169.99656677246094
+physics:upperLimit: 0.0
+drive:angular:physics:targetPosition: 0.0
+drive:angular:physics:stiffness: 1.7453292608261108
+drive:angular:physics:damping: 0.01745329238474369
+physics:body0: [Sdf.Path('/piper/link2')]
+physics:body1: [Sdf.Path('/piper/link3')]
+
+--------------------------------------------------------------------------------
+name: joint4
+path: /piper/joints/joint4
+type: PhysicsRevoluteJoint
+physics:axis: Z
+physics:localPos0: (-0.021984, -0.25075, 0)
+physics:localRot0: (0.7071055, 0.7071081, 0, 0)
+physics:localPos1: (0, 0, 0)
+physics:localRot1: (1, 0, 0, 0)
+physics:lowerLimit: -99.98113250732422
+physics:upperLimit: 99.98113250732422
+drive:angular:physics:targetPosition: 0.0
+drive:angular:physics:stiffness: 1.7453292608261108
+drive:angular:physics:damping: 0.01745329238474369
+physics:body0: [Sdf.Path('/piper/link3')]
+physics:body1: [Sdf.Path('/piper/link4')]
+
+--------------------------------------------------------------------------------
+name: joint5
+path: /piper/joints/joint5
+type: PhysicsRevoluteJoint
+physics:axis: Z
+physics:localPos0: (0, 0, 0)
+physics:localRot0: (0.7071055, -0.7071081, 0, 0)
+physics:localPos1: (0, 0, 0)
+physics:localRot1: (1, 0, 0, 0)
+physics:lowerLimit: -69.90084838867188
+physics:upperLimit: 69.90084838867188
+drive:angular:physics:targetPosition: 0.0
+drive:angular:physics:stiffness: 1.7453292608261108
+drive:angular:physics:damping: 0.01745329238474369
+physics:body0: [Sdf.Path('/piper/link4')]
+physics:body1: [Sdf.Path('/piper/link5')]
+
+--------------------------------------------------------------------------------
+name: joint6
+path: /piper/joints/joint6
+type: PhysicsRevoluteJoint
+physics:axis: Z
+physics:localPos0: (0.000088259, -0.091, 0)
+physics:localRot0: (0.7071055, 0.7071081, 0, 0)
+physics:localPos1: (0, 0, 0)
+physics:localRot1: (1, 0, 0, 0)
+physics:lowerLimit: -120.0002670288086
+physics:upperLimit: 120.0002670288086
+drive:angular:physics:targetPosition: 0.0
+drive:angular:physics:stiffness: 1.7453292608261108
+drive:angular:physics:damping: 0.01745329238474369
+physics:body0: [Sdf.Path('/piper/link5')]
+physics:body1: [Sdf.Path('/piper/link6')]
+
+--------------------------------------------------------------------------------
+name: joint7
+path: /piper/joints/joint7
+type: PhysicsPrismaticJoint
+physics:axis: Z
+physics:localPos0: (0, 0, 0.1358)
+physics:localRot0: (0.7071055, 0.7071081, 0, 0)
+physics:localPos1: (0, 0, 0)
+physics:localRot1: (1, 0, 0, 0)
+physics:lowerLimit: 0.0
+physics:upperLimit: 0.03500000014901161
+physics:body0: [Sdf.Path('/piper/gripper_base')]
+physics:body1: [Sdf.Path('/piper/link7')]
+
+--------------------------------------------------------------------------------
+name: joint8
+path: /piper/joints/joint8
+type: PhysicsPrismaticJoint
+physics:axis: Z
+physics:localPos0: (0, 0, 0.1358)
+physics:localRot0: (0.7071081, 0.7071055, -0.000002559715, -0.0000025597242)
+physics:localPos1: (0, 0, 0)
+physics:localRot1: (0, 0, 1, 0)
+physics:lowerLimit: -0.03500000014901161
+physics:upperLimit: 0.0
+physics:body0: [Sdf.Path('/piper/gripper_base')]
+physics:body1: [Sdf.Path('/piper/link8')]
