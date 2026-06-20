@@ -145,6 +145,7 @@ class AlgSolution:
         self.current_trash_servo = None
         self.last_yolo_diag = {"available": False, "reason": "not_checked"}
         self.ready_to_grasp_steps = 0
+        self.ready_to_grasp_last_image = None
         self.locked_trash_target = None
         self.locked_trash_miss_steps = 0
         self.far_locked_target = None
@@ -600,6 +601,7 @@ class AlgSolution:
                     self.ready_to_grasp_steps = 0
                     return self._velocity_tensor(0.0, 0.0, 0.0)
                 self.ready_to_grasp_steps = 0
+                self.ready_to_grasp_last_image = None
                 self.approach_target_lost_steps = 0
                 self.phase = "FAR_SEARCH_TRASH"
                 return self._velocity_tensor(0.0, 0.0, 0.0)
@@ -608,12 +610,16 @@ class AlgSolution:
             servo = self._compute_trash_servo_command(self.current_trash_target)
             self.current_trash_servo = dict(servo)
             if servo.get("ready_to_grasp"):
-                self.ready_to_grasp_steps += 1
-                if self.ready_to_grasp_steps >= 12:
+                image_key = self._target_image_key(self.current_trash_target)
+                if image_key != self.ready_to_grasp_last_image:
+                    self.ready_to_grasp_steps += 1
+                    self.ready_to_grasp_last_image = image_key
+                if self.ready_to_grasp_steps >= 5:
                     self.phase = "READY_TO_GRASP"
                 return self._velocity_tensor(0.0, 0.0, 0.0)
 
             self.ready_to_grasp_steps = 0
+            self.ready_to_grasp_last_image = None
             return self._velocity_tensor(
                 float(servo["lin_x"]),
                 float(servo["lin_y"]),
@@ -888,10 +894,10 @@ class AlgSolution:
         # 明确执行相机切换规则：
         # 1. 本体 live 相机中有有效垃圾时，进入/保持 BODY_TRACK，并只用本体目标微调；
         # 2. 本体连续丢失数轮后，才退回 live 末端相机 EE_SEARCH；
-        # 3. 末端相机也没有 live 目标时，才用 scan 目标做粗导航兜底。
+        # 3. 主实时流程不再用历史 scan 图兜底，避免机器人移动后旧世界坐标误导控制。
         body_targets = [t for t in targets if self._is_valid_body_target(t)]
         ee_targets = [t for t in targets if self._is_valid_ee_target(t)]
-        scan_targets = [t for t in targets if self._is_scan_target(t)]
+        scan_targets = []
 
         if body_targets and (self.trash_servo_mode != "scan_coarse" or self._body_target_can_takeover(body_targets)):
             self.trash_servo_mode = "body_track"
@@ -981,13 +987,13 @@ class AlgSolution:
             self.ee_target_lost_steps = 0
             return self._lock_or_choose_far_target(ee_far)
 
-        scan_targets = [t for t in targets if self._is_scan_target(t)]
-        if scan_targets:
-            self.trash_servo_mode = "scan_coarse"
-            self.locked_trash_target = None
-            self.locked_trash_miss_steps = 0
-            return min(scan_targets, key=lambda t: (t.distance_hint_m, -t.confidence))
         return None
+
+    @staticmethod
+    def _target_image_key(target) -> str | None:
+        if target is None or getattr(target, "frame_kind", None) != "live":
+            return None
+        return getattr(target, "source_image", None)
 
     def _lock_or_choose_far_target(self, candidates):
         if not candidates:
@@ -1231,6 +1237,7 @@ class AlgSolution:
                     ),
                     "servo": self.current_trash_servo,
                     "ready_to_grasp_steps": int(self.ready_to_grasp_steps),
+                    "ready_to_grasp_last_image": self.ready_to_grasp_last_image,
                     "approach_target_lost_steps": int(self.approach_target_lost_steps),
                     "far_locked_target": (
                         None

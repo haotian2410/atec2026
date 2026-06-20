@@ -235,7 +235,7 @@ def servo_command_from_target(target: TrashTarget) -> dict[str, float | bool | s
     行走策略使用机器人本体系速度：+x 前进、+y 向左、+yaw 逆时针。
     远距离 ee 目标用于粗靠近；近距离 head/body 目标用于抓取预备位微调。
     近距离阶段不追求画面中心，而是让垃圾落在 head 视角中下部：
-    - 横向误差主要用 lin_y 修正；
+    - 横向误差主要用 lin_y 修正，目标在图像右侧时向右横移；
     - 距离和竖直图像误差共同决定 lin_x；
     - yaw_rate 只保留很小修正，避免旋转造成目标框跳动和定位误差放大。
     """
@@ -252,7 +252,7 @@ def servo_command_from_target(target: TrashTarget) -> dict[str, float | bool | s
         target_err_y = 0.48
         vertical_error = err_y - target_err_y
         forward = float(np.clip(0.28 * (distance - 0.72) - 0.12 * vertical_error, -0.10, 0.20))
-        lateral = float(np.clip(0.42 * err_x, -0.22, 0.22))
+        lateral = float(np.clip(-0.42 * err_x, -0.22, 0.22))
         yaw_rate = float(np.clip(-0.08 * err_x, -0.05, 0.05))
     else:
         forward = float(np.clip(0.55 * (distance - 0.9), 0.0, 0.75))
