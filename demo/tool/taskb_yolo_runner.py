@@ -38,9 +38,12 @@ class TaskBYoloRunner:
       camera, bbox, confidence, label, source_image, scan_angle_deg, depth_m。
     """
 
-    def __init__(self, model_path: str | os.PathLike | None = None, conf: float = 0.25):
+    def __init__(self, model_path: str | os.PathLike | None = None, conf: float = 0.25,
+                 head_conf: float = 0.45, head_dedup: bool = True):
         self.model_path = None if model_path is None else Path(model_path)
         self.conf = float(conf)
+        self.head_conf = float(head_conf)
+        self.head_dedup = bool(head_dedup)
         self.model = self._load_model(self.model_path)
         self._prediction_cache: dict[str, dict[str, Any]] = {}
 
@@ -67,12 +70,16 @@ class TaskBYoloRunner:
                 cached_count += 1
             else:
                 predicted_count += 1
+            if meta["camera"] in ("head", "video") and self.head_dedup:
+                image_detections = self._dedup_detections(image_detections)
+
             for det in image_detections:
                 bbox = det.get("bbox")
                 if bbox is None or len(bbox) != 4:
                     continue
                 confidence = float(det.get("confidence", det.get("conf", 1.0)))
-                if confidence < self.conf:
+                min_conf = self.head_conf if meta["camera"] in ("head", "video") else self.conf
+                if confidence < min_conf:
                     continue
 
                 record = {
@@ -96,6 +103,8 @@ class TaskBYoloRunner:
                 "scan_dir": str(scan_path),
                 "model": None if self.model_path is None else str(self.model_path),
                 "confidence_threshold": self.conf,
+                "head_confidence_threshold": self.head_conf,
+                "head_dedup": self.head_dedup,
                 "count": len(detections),
                 "image_count": len(image_paths),
                 "predicted_image_count": predicted_count,
@@ -151,7 +160,7 @@ class TaskBYoloRunner:
         except OSError:
             return [], False
         cache_key = str(image_path.resolve())
-        signature = (stat.st_mtime_ns, stat.st_size, self.conf)
+        signature = (stat.st_mtime_ns, stat.st_size, self.conf, self.head_conf, self.head_dedup)
         cached = self._prediction_cache.get(cache_key)
         if cached is not None and cached.get("signature") == signature:
             return list(cached.get("detections", [])), True
@@ -190,6 +199,59 @@ class TaskBYoloRunner:
                     }
                 )
         return parsed
+
+    @staticmethod
+    def _bbox_area(box: list[float]) -> float:
+        x1, y1, x2, y2 = [float(v) for v in box]
+        return max(0.0, x2 - x1) * max(0.0, y2 - y1)
+
+    @staticmethod
+    def _bbox_iou(a: list[float], b: list[float]) -> float:
+        ax1, ay1, ax2, ay2 = [float(v) for v in a]
+        bx1, by1, bx2, by2 = [float(v) for v in b]
+        ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+        ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+        inter = TaskBYoloRunner._bbox_area([ix1, iy1, ix2, iy2])
+        denom = TaskBYoloRunner._bbox_area(a) + TaskBYoloRunner._bbox_area(b) - inter
+        return inter / denom if denom > 1e-9 else 0.0
+
+    @staticmethod
+    def _bbox_center_distance_norm(a: list[float], b: list[float], width: float = 640.0, height: float = 480.0) -> float:
+        acx, acy = 0.5 * (float(a[0]) + float(a[2])), 0.5 * (float(a[1]) + float(a[3]))
+        bcx, bcy = 0.5 * (float(b[0]) + float(b[2])), 0.5 * (float(b[1]) + float(b[3]))
+        return math.hypot((acx - bcx) / max(width, 1.0), (acy - bcy) / max(height, 1.0))
+
+    @staticmethod
+    def _dedup_detections(detections: list[dict[str, Any]], iou_threshold: float = 0.20,
+                          center_threshold: float = 0.22) -> list[dict[str, Any]]:
+        # 新 YOLO 在近距离 head 图上会对同一物体给多个相邻框。
+        # 同图同类中，IoU 较高或中心非常接近的框只保留最高置信度。
+        kept: list[dict[str, Any]] = []
+        sorted_dets = sorted(
+            detections,
+            key=lambda item: float(item.get("confidence", item.get("conf", 0.0))),
+            reverse=True,
+        )
+        for det in sorted_dets:
+            bbox = det.get("bbox")
+            if bbox is None or len(bbox) != 4:
+                continue
+            label = str(det.get("label", det.get("name", "trash")))
+            duplicate = False
+            for old in kept:
+                old_label = str(old.get("label", old.get("name", "trash")))
+                old_bbox = old.get("bbox")
+                if old_label != label or old_bbox is None or len(old_bbox) != 4:
+                    continue
+                if (
+                    TaskBYoloRunner._bbox_iou(bbox, old_bbox) >= iou_threshold
+                    or TaskBYoloRunner._bbox_center_distance_norm(bbox, old_bbox) <= center_threshold
+                ):
+                    duplicate = True
+                    break
+            if not duplicate:
+                kept.append(det)
+        return kept
 
     @staticmethod
     def _image_ready(image_path: Path, min_age_s: float = 0.15, min_size: int = 128) -> bool:
@@ -290,20 +352,23 @@ def main():
     parser.add_argument("--scan-dir", type=Path, default=None, help="Scan image directory. Defaults to latest outputs/taskb_scan/*.")
     parser.add_argument("--model", type=Path, default=os.environ.get("TASKB_YOLO_MODEL"), help="YOLO model path, e.g. best.pt.")
     parser.add_argument("--output", type=Path, default=None, help="Output JSON path. Defaults to <scan-dir>/yolo_results.json.")
-    parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold.")
+    parser.add_argument("--conf", type=float, default=0.25, help="Base confidence threshold for non-head cameras.")
+    parser.add_argument("--head-conf", type=float, default=0.45, help="Confidence threshold for head/video cameras.")
+    parser.add_argument("--no-head-dedup", action="store_true", help="Disable duplicate-box suppression for head/video cameras.")
     parser.add_argument("--watch", action="store_true", help="Keep detecting new live_* frames during approach.")
     parser.add_argument("--interval", type=float, default=0.25, help="Watch polling interval in seconds.")
+    parser.add_argument("--max-live-per-camera", type=int, default=12, help="Number of recent live frames per camera to keep in each watch result.")
     args = parser.parse_args()
 
-    runner = TaskBYoloRunner(model_path=args.model, conf=args.conf)
+    runner = TaskBYoloRunner(model_path=args.model, conf=args.conf, head_conf=args.head_conf, head_dedup=not args.no_head_dedup)
     if args.watch:
         # watch 模式下不指定 --scan-dir 时会自动跟随最新扫描目录。
-        runner.watch_scan_dir(args.scan_dir, output=args.output, interval=args.interval)
+        runner.watch_scan_dir(args.scan_dir, output=args.output, interval=args.interval, max_live_per_camera=args.max_live_per_camera)
     else:
         scan_dir = args.scan_dir or latest_scan_dir()
         if scan_dir is None:
             raise SystemExit("No scan directory found under outputs/taskb_scan.")
-        result = runner.run_scan_dir(scan_dir, output=args.output)
+        result = runner.run_scan_dir(scan_dir, output=args.output, max_live_per_camera=args.max_live_per_camera)
         print(json.dumps(result["meta"], ensure_ascii=False, indent=2))
 
 

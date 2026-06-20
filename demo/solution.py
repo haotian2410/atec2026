@@ -1,11 +1,24 @@
 """TaskB 主策略入口。
 
-整体流程：
-1. 加载腿部行走策略 policy.pt，保持机械臂默认动作；
-2. 用 Localizer2D 维护策略层二维位姿，并用视觉/LiDAR 对投放区先验做小权重校正；
-3. 状态机先走到投放区外侧站位，再面向投放区；
-4. 到位后原地慢扫一圈，只锁定近距离稳定垃圾；
-5. 附近没有目标时再用末端相机远搜粗引导，接近后切回本体相机精调。
+本文件负责比赛主状态机、底盘速度指令、相机帧保存和 YOLO 结果轮询；
+具体的 YOLO JSON 解析、深度反投影和视觉伺服公式在 demo/tool/yolo_targets.py。
+
+当前垃圾搜索/接近流程：
+1. GO_TO_DROP_STAND / FACE_DROP_CENTER：先到投放区外侧站位并面向投放区；
+2. FACE_NEAR_SWEEP_START：转到背向投放区的有效搜索扇区起点，期间也保存 live 帧；
+3. NEAR_SWEEP_TRASH：低速近扫，只允许 head/body 近目标或很近的 ee 目标接管；
+4. FAR_SEARCH_TRASH：近处没目标后，末端相机顺时针扫约 165 度有效扇区，
+   锁定一个 ee 远目标后进入粗接近，不继续看边界/投放区矮墙；
+5. APPROACH_TRASH_TARGET：持续保存最新 live 帧并刷新 YOLO。ee 远目标保持锁定粗靠近，
+   一旦 head/body 最新帧看到近目标，切到本体相机微调；
+6. READY_TO_GRASP：本体相机目标满足中下部视角和距离条件后，底盘静止等待抓取逻辑。
+
+关键函数位置：
+- _compute_navigation_command(): 主状态机和每个阶段的速度决策；
+- _refresh_yolo_targets(): 轮询 yolo_results.json，避免接近阶段用通用选择器破坏远端锁；
+- _select_far_search_target() / _lock_or_choose_far_target(): ee 远搜目标选择和稳定锁定；
+- _select_approach_target() / _choose_latest_body_target(): 接近阶段相机切换和最新 head/body 帧优先；
+- _write_pose_state(): 给 pose_viewer 和调试用的状态快照。
 
 solution.py 只负责调度和控制闭环；地图先验、投放区拟合、YOLO 数据契约、
 Piper 运动学等细节放在 demo/tool 目录，避免主状态机继续膨胀。
@@ -134,10 +147,13 @@ class AlgSolution:
         self.ready_to_grasp_steps = 0
         self.locked_trash_target = None
         self.locked_trash_miss_steps = 0
+        self.far_locked_target = None
+        self.far_locked_miss_steps = 0
         self.trash_servo_mode = "scan_coarse"
         self.body_target_lost_steps = 0
         self.ee_target_lost_steps = 0
-        self.live_frame_interval = 5
+        self.approach_target_lost_steps = 0
+        self.live_frame_interval = 3
         self.last_live_frame_step = -1
         self.yolo_enabled = os.environ.get("ATEC_DISABLE_EMBEDDED_YOLO", "0") != "1"
         self.yolo_model_path = os.environ.get("TASKB_YOLO_MODEL")
@@ -151,6 +167,7 @@ class AlgSolution:
             )
         self.yolo_conf = float(os.environ.get("TASKB_YOLO_CONF", "0.25"))
         self.yolo_watch_interval = float(os.environ.get("TASKB_YOLO_INTERVAL", "0.35"))
+        self.yolo_max_live_per_camera = int(os.environ.get("TASKB_YOLO_MAX_LIVE", "12"))
         self.yolo_thread = None
         self.yolo_stop_event = None
         self.yolo_process = None
@@ -158,26 +175,33 @@ class AlgSolution:
         self.yolo_started = False
         self.yolo_start_error = None
 
-        # 垃圾搜索分两层：
-        # 1. near sweep：只扫背向投放区的有效扇区，同时看 head 和 ee，只接受近目标；
-        # 2. far search：近处清空后，才允许 ee 远目标作为粗导航目标。
+        # 垃圾搜索分层：
+        # 1. near sweep：背向投放区扫有效扇区，只接受 head/body 近目标或很近 ee 目标；
+        # 2. far search：近处清空后，ee 顺时针扫有效远搜扇区并锁定单个远目标；
+        # 3. approach：远目标粗靠近，本体相机看到近目标后用最新 head/body 帧微调。
         self.scan_base_heading = None
         self.scan_offsets = [math.radians(180.0)]
         self.scan_index = 0
         self.turn_target_yaw = None
         self.turn_stable_steps = 0
+        self.face_near_prealign_prev_yaw = None
+        self.face_near_prealign_accum_yaw = 0.0
+        self.face_near_prealign_steps = 0
         self.scan_saved = set()
         self.near_sweep_start_yaw = None
         self.near_sweep_prev_yaw = None
         self.near_sweep_accum_yaw = 0.0
         self.near_sweep_span = math.radians(170.0)
         self.near_sweep_min_turn = self.near_sweep_span
-        self.near_sweep_yaw_rate = 0.30
+        self.near_sweep_yaw_rate = 0.22
         self.near_body_max_distance = 1.60
         self.near_ee_max_distance = 0.90
         self.far_ee_min_distance = 0.75
         self.far_search_turn_steps = 0
-        self.far_search_max_steps = 180
+        self.far_search_prev_yaw = None
+        self.far_search_accum_yaw = 0.0
+        self.far_search_span = math.radians(165.0)
+        self.far_search_yaw_rate = -0.20
         self.drop_wall_safe_distance = map_prior.DROP_RADIUS + 0.45
 
         self.current_velocity_commands = torch.tensor(
@@ -382,6 +406,9 @@ class AlgSolution:
                     target_heading + math.pi - 0.5 * self.near_sweep_span
                 )
                 self.turn_stable_steps = 0
+                self.face_near_prealign_prev_yaw = self.localizer.yaw
+                self.face_near_prealign_accum_yaw = 0.0
+                self.face_near_prealign_steps = 0
                 self._ensure_yolo_runner_started()
                 self.phase = "FACE_NEAR_SWEEP_START"
                 return self._velocity_tensor(0.0, 0.0, 0.0)
@@ -392,20 +419,42 @@ class AlgSolution:
             clearance_cmd = self._drop_wall_clearance_command()
             if clearance_cmd is not None:
                 return clearance_cmd
+            # 预对齐阶段也保存/刷新 live 帧，避免“还没开始扫图”时看起来像卡住。
+            # 如果本体相机已经看到近目标，直接接管，不必等转到扇区起点。
+            self._ensure_yolo_runner_started()
+            self._save_live_servo_frame(obs)
+            self._refresh_yolo_targets()
+            near_target = self._select_near_sweep_target(self.trash_targets)
+            if near_target is not None:
+                self.current_trash_target = near_target
+                self.ready_to_grasp_steps = 0
+                self.phase = "APPROACH_TRASH_TARGET"
+                return self._velocity_tensor(0.0, 0.0, 0.0)
+
             if self.turn_target_yaw is None:
                 self.turn_target_yaw = self._wrap_angle(self.localizer.yaw + math.pi)
             heading_error = self._wrap_angle(self.turn_target_yaw - self.localizer.yaw)
-            if abs(heading_error) < 0.08:
-                self.turn_stable_steps += 1
-                if self.turn_stable_steps >= 4:
-                    self.near_sweep_start_yaw = self.localizer.yaw
-                    self.near_sweep_prev_yaw = self.localizer.yaw
-                    self.near_sweep_accum_yaw = 0.0
-                    self.turn_stable_steps = 0
-                    self.phase = "NEAR_SWEEP_TRASH"
-                return self._velocity_tensor(0.0, 0.0, 0.0)
+            if self.face_near_prealign_prev_yaw is None:
+                self.face_near_prealign_prev_yaw = self.localizer.yaw
+            delta_yaw = abs(self._wrap_angle(self.localizer.yaw - self.face_near_prealign_prev_yaw))
+            self.face_near_prealign_accum_yaw += delta_yaw
+            self.face_near_prealign_prev_yaw = self.localizer.yaw
+            self.face_near_prealign_steps += 1
+
+            prealign_close_enough = abs(heading_error) < 0.30
+            prealign_turned_enough = self.face_near_prealign_accum_yaw >= math.radians(105.0)
+            prealign_timed_out = self.face_near_prealign_steps >= 90
+            if prealign_close_enough or prealign_turned_enough or prealign_timed_out:
+                self.near_sweep_start_yaw = self.localizer.yaw
+                self.near_sweep_prev_yaw = self.localizer.yaw
+                self.near_sweep_accum_yaw = 0.0
+                self.turn_stable_steps = 0
+                self.phase = "NEAR_SWEEP_TRASH"
+                return self._velocity_tensor(0.0, 0.0, self.near_sweep_yaw_rate)
             self.turn_stable_steps = 0
             yaw_rate = float(np.clip(1.2 * heading_error, -0.50, 0.50))
+            if abs(yaw_rate) < 0.32:
+                yaw_rate = math.copysign(0.32, heading_error)
             return self._velocity_tensor(0.0, 0.0, yaw_rate)
 
         if self.phase == "NEAR_SWEEP_TRASH":
@@ -432,7 +481,11 @@ class AlgSolution:
             if self.near_sweep_accum_yaw >= self.near_sweep_min_turn:
                 self.locked_trash_target = None
                 self.locked_trash_miss_steps = 0
+                self.far_locked_target = None
+                self.far_locked_miss_steps = 0
                 self.far_search_turn_steps = 0
+                self.far_search_prev_yaw = self.localizer.yaw
+                self.far_search_accum_yaw = 0.0
                 self.phase = "FAR_SEARCH_TRASH"
                 return self._velocity_tensor(0.0, 0.0, 0.0)
             return self._velocity_tensor(0.0, 0.0, self.near_sweep_yaw_rate)
@@ -441,9 +494,8 @@ class AlgSolution:
             clearance_cmd = self._drop_wall_clearance_command()
             if clearance_cmd is not None:
                 return clearance_cmd
-            # 近扫一圈没有近目标后，不再做第二轮固定拍照。
-            # 低速转动只为了让高位/广角 ee 找远目标；一旦有远目标就粗靠近，
-            # 靠近过程中 head 近目标仍然可以接管。
+            # 近扫没有近目标后，远搜改为顺时针扫一个较短有效扇区。
+            # 不沿着近扫方向继续看边界/投放区矮墙；一旦 ee 看到远目标就锁定粗靠近。
             self._ensure_yolo_runner_started()
             self._save_live_servo_frame(obs)
             self._refresh_yolo_targets()
@@ -453,14 +505,21 @@ class AlgSolution:
                 self.ready_to_grasp_steps = 0
                 self.phase = "APPROACH_TRASH_TARGET"
                 return self._velocity_tensor(0.0, 0.0, 0.0)
+            if self.far_search_prev_yaw is None:
+                self.far_search_prev_yaw = self.localizer.yaw
+            delta_yaw = abs(self._wrap_angle(self.localizer.yaw - self.far_search_prev_yaw))
+            self.far_search_accum_yaw += delta_yaw
+            self.far_search_prev_yaw = self.localizer.yaw
             self.far_search_turn_steps += 1
-            if self.far_search_turn_steps >= self.far_search_max_steps:
+            if self.far_search_accum_yaw >= self.far_search_span:
                 self.far_search_turn_steps = 0
+                self.far_search_prev_yaw = self.localizer.yaw
+                self.far_search_accum_yaw = 0.0
                 self.phase = "NEAR_SWEEP_TRASH"
                 self.near_sweep_prev_yaw = self.localizer.yaw
                 self.near_sweep_accum_yaw = 0.0
                 return self._velocity_tensor(0.0, 0.0, 0.0)
-            return self._velocity_tensor(0.0, 0.0, 0.16)
+            return self._velocity_tensor(0.0, 0.0, self.far_search_yaw_rate)
 
         if self.phase == "TURN_AROUND_SCAN_READY":
             # 原地转到 180 度方向，并在稳定停住后保存图片。
@@ -522,6 +581,7 @@ class AlgSolution:
 
         if self.phase == "APPROACH_TRASH_TARGET":
             self._ensure_yolo_runner_started()
+            previous_target = self.current_trash_target
             # 闭环视觉伺服阶段：
             # 1. 接近过程中持续保存当前 head/video 和 ee RGB-D 帧，供 YOLO runner --watch 检测；
             # 2. yolo_targets.py 会优先选择 live head/video/body 中最近的目标做精校；
@@ -530,12 +590,21 @@ class AlgSolution:
             self._save_live_servo_frame(obs)
             self._refresh_yolo_targets()
             if self.trash_targets:
-                self.current_trash_target = self._select_servo_target(self.trash_targets)
+                self.current_trash_target = self._select_approach_target(self.trash_targets)
             if self.current_trash_target is None:
+                # 近距离 head 目标在转动/靠近时可能短暂掉框。先停住等 YOLO 重捕获，
+                # 不要几帧空结果就回到搜索转圈；超过短暂窗口后再退到远搜。
+                self.approach_target_lost_steps += 1
+                if previous_target is not None and self.approach_target_lost_steps <= 15:
+                    self.current_trash_target = previous_target
+                    self.ready_to_grasp_steps = 0
+                    return self._velocity_tensor(0.0, 0.0, 0.0)
                 self.ready_to_grasp_steps = 0
+                self.approach_target_lost_steps = 0
                 self.phase = "FAR_SEARCH_TRASH"
                 return self._velocity_tensor(0.0, 0.0, 0.0)
 
+            self.approach_target_lost_steps = 0
             servo = self._compute_trash_servo_command(self.current_trash_target)
             self.current_trash_servo = dict(servo)
             if servo.get("ready_to_grasp"):
@@ -622,7 +691,7 @@ class AlgSolution:
         while not stop_event.is_set():
             try:
                 if os.path.isdir(self.scan_dir):
-                    runner.run_scan_dir(self.scan_dir, output=output_path, max_live_per_camera=1)
+                    runner.run_scan_dir(self.scan_dir, output=output_path, max_live_per_camera=self.yolo_max_live_per_camera)
             except Exception as err:
                 self.last_yolo_diag = {
                     "available": False,
@@ -653,6 +722,8 @@ class AlgSolution:
                 "--watch",
                 "--interval",
                 str(self.yolo_watch_interval),
+                "--max-live-per-camera",
+                str(self.yolo_max_live_per_camera),
             ]
             self.yolo_process = subprocess.Popen(
                 cmd,
@@ -758,7 +829,7 @@ class AlgSolution:
         # 排序策略在 demo/tool/yolo_targets.py：
         # head/video 近距离目标优先，ee 远距离目标作为粗引导；同类目标按距离近、
         # 置信度高排序。这里保持轻量，避免把检测模块和控制状态机耦合死。
-        if self.step_count % 10 != 0:
+        if self.step_count % 3 != 0:
             return
         targets, diag = load_yolo_targets(
             self.project_root,
@@ -771,16 +842,47 @@ class AlgSolution:
         self.last_yolo_diag = diag
         if targets:
             self.trash_targets = targets
-            if self.phase not in ("NEAR_SWEEP_TRASH", "FAR_SEARCH_TRASH"):
+            if self.phase not in ("NEAR_SWEEP_TRASH", "FAR_SEARCH_TRASH", "APPROACH_TRASH_TARGET"):
                 self.current_trash_target = self._select_servo_target(targets)
         elif diag.get("available"):
-            # 当前 YOLO JSON 明确没有可用目标时，不能继续沿用旧目标。
-            # 上一轮目标可能已经离开视野或来自异常深度/反投影，继续前进容易撞出场地。
+            # YOLO runner 写 JSON 有短暂空窗。远端 ee 目标已经锁住时，保留几帧锁定，
+            # 避免显示/控制在“有框-无框”之间闪烁；超过窗口再清空，防止盲走太久。
+            if self.trash_servo_mode == "ee_far_search" and self.far_locked_target is not None:
+                self.far_locked_miss_steps += 1
+                if self.far_locked_miss_steps <= 8:
+                    self.current_trash_target = self.far_locked_target
+                    return
+                self.far_locked_target = None
+                self.far_locked_miss_steps = 0
             self.trash_targets = []
             self.current_trash_target = None
             self.locked_trash_target = None
             self.locked_trash_miss_steps = 0
 
+
+    def _select_approach_target(self, targets):
+        # 从 ee 远搜进入接近后，继续锁定同一个远目标，避免多个远处垃圾之间来回跳。
+        # 只有本体相机看到近距离目标时才允许接管，符合“远端粗靠近 -> 本体精调”。
+        body_targets = [t for t in targets if self._is_valid_body_target(t)]
+        if body_targets and self._body_target_can_takeover(body_targets):
+            self.far_locked_target = None
+            self.far_locked_miss_steps = 0
+            self.trash_servo_mode = "body_track"
+            self.body_target_lost_steps = 0
+            return self._choose_latest_body_target(body_targets)
+
+        if self.trash_servo_mode == "ee_far_search":
+            ee_far = [
+                t for t in targets
+                if self._is_valid_ee_far_search_target(t)
+                and t.distance_hint_m >= self.far_ee_min_distance
+                and abs(t.image_error[1]) <= 0.90
+            ]
+            far = self._lock_or_choose_far_target(ee_far)
+            if far is not None:
+                return far
+
+        return self._select_servo_target(targets)
 
     def _select_servo_target(self, targets):
         # 明确执行相机切换规则：
@@ -794,7 +896,7 @@ class AlgSolution:
         if body_targets and (self.trash_servo_mode != "scan_coarse" or self._body_target_can_takeover(body_targets)):
             self.trash_servo_mode = "body_track"
             self.body_target_lost_steps = 0
-            return self._lock_or_choose(body_targets, allow_switch_distance=0.30)
+            return self._choose_latest_body_target(body_targets)
 
         if self.trash_servo_mode == "body_track":
             self.body_target_lost_steps += 1
@@ -817,6 +919,27 @@ class AlgSolution:
         self.locked_trash_target = None
         self.locked_trash_miss_steps = 0
         return scan_targets[0] if scan_targets else None
+
+    def _choose_latest_body_target(self, targets):
+        if not targets:
+            return None
+        latest_step = max(self._target_live_step(t) for t in targets)
+        latest = [t for t in targets if self._target_live_step(t) == latest_step]
+        chosen = min(latest, key=lambda t: (t.distance_hint_m, abs(t.image_error[0]), -t.confidence))
+        self.locked_trash_target = chosen
+        self.locked_trash_miss_steps = 0
+        return chosen
+
+    @staticmethod
+    def _target_live_step(target) -> int:
+        name = target.source_image or ""
+        parts = str(name).split("_")
+        if len(parts) >= 2 and parts[0] == "live":
+            try:
+                return int(parts[1])
+            except Exception:
+                return -1
+        return -1
 
     def _select_near_sweep_target(self, targets):
         # 近扫阶段只接受近距离、当前 live 目标。head 负责精调；ee 只补很近盲区，
@@ -849,14 +972,14 @@ class AlgSolution:
 
         ee_far = [
             t for t in targets
-            if self._is_valid_ee_target(t)
+            if self._is_valid_ee_far_search_target(t)
             and t.distance_hint_m >= self.far_ee_min_distance
-            and abs(t.image_error[1]) <= 0.75
+            and abs(t.image_error[1]) <= 0.85
         ]
         if ee_far:
             self.trash_servo_mode = "ee_far_search"
             self.ee_target_lost_steps = 0
-            return self._lock_or_choose(ee_far, allow_switch_distance=0.60)
+            return self._lock_or_choose_far_target(ee_far)
 
         scan_targets = [t for t in targets if self._is_scan_target(t)]
         if scan_targets:
@@ -865,6 +988,64 @@ class AlgSolution:
             self.locked_trash_miss_steps = 0
             return min(scan_targets, key=lambda t: (t.distance_hint_m, -t.confidence))
         return None
+
+    def _lock_or_choose_far_target(self, candidates):
+        if not candidates:
+            self.far_locked_miss_steps += 1
+            if self.far_locked_miss_steps > 8:
+                self.far_locked_target = None
+            return self.far_locked_target if self.far_locked_miss_steps <= 8 else None
+
+        # 第一次远搜锁定：优先选画面中更居中、置信度高、距离合理的 ee 目标。
+        # 之后只按相似度跟踪，不因为另一个目标稍近就切换。
+        if self.far_locked_target is None:
+            self.far_locked_target = min(
+                candidates,
+                key=lambda t: (abs(t.image_error[0]) + 0.35 * abs(t.image_error[1]), t.distance_hint_m, -t.confidence),
+            )
+            self.far_locked_miss_steps = 0
+            self.locked_trash_target = self.far_locked_target
+            self.locked_trash_miss_steps = 0
+            return self.far_locked_target
+
+        match = self._match_far_target(self.far_locked_target, candidates)
+        if match is not None:
+            self.far_locked_target = match
+            self.far_locked_miss_steps = 0
+            self.locked_trash_target = match
+            self.locked_trash_miss_steps = 0
+            return match
+
+        self.far_locked_miss_steps += 1
+        if self.far_locked_miss_steps <= 8:
+            return self.far_locked_target
+
+        self.far_locked_target = min(
+            candidates,
+            key=lambda t: (abs(t.image_error[0]) + 0.35 * abs(t.image_error[1]), t.distance_hint_m, -t.confidence),
+        )
+        self.far_locked_miss_steps = 0
+        self.locked_trash_target = self.far_locked_target
+        self.locked_trash_miss_steps = 0
+        return self.far_locked_target
+
+    def _match_far_target(self, locked, candidates):
+        if locked is None:
+            return None
+        if locked.world_xy is not None:
+            best = None
+            best_dist = float("inf")
+            locked_xy = np.asarray(locked.world_xy, dtype=np.float64)
+            for target in candidates:
+                if target.world_xy is None:
+                    continue
+                dist = float(np.linalg.norm(np.asarray(target.world_xy, dtype=np.float64) - locked_xy))
+                if dist < best_dist:
+                    best = target
+                    best_dist = dist
+            if best is not None and best_dist < 1.25:
+                return best
+        return self._match_specific_target(locked, candidates, max_score=1.20)
 
     def _lock_or_choose(self, candidates, allow_switch_distance: float):
         if not candidates:
@@ -889,6 +1070,9 @@ class AlgSolution:
         locked = self.locked_trash_target
         if locked is None:
             return None
+        return self._match_specific_target(locked, targets, max_score=0.45)
+
+    def _match_specific_target(self, locked, targets, max_score: float):
         best = None
         best_score = float("inf")
         for target in targets:
@@ -898,7 +1082,7 @@ class AlgSolution:
             if score < best_score:
                 best = target
                 best_score = score
-        return best if best_score < 0.45 else None
+        return best if best_score < max_score else None
 
     @staticmethod
     def _target_similarity_score(a, b) -> float:
@@ -939,6 +1123,16 @@ class AlgSolution:
         # ee 相机是粗搜索用；如果反投影到狗本体系后方，当前底盘伺服不能直接前进追它。
         if target.point_body is not None and float(target.point_body[0]) < 0.10:
             return False
+        return 0.20 <= target.distance_hint_m <= 6.0
+
+    @staticmethod
+    def _is_valid_ee_far_search_target(target) -> bool:
+        if target.frame_kind != "live" or target.camera != "ee":
+            return False
+        if not AlgSolution._target_bbox_ok(target, max_area=0.45, reject_touch=2):
+            return False
+        # 远搜阶段 ee 只做粗引导，不把 FK 反投影的 body_x 作为硬门控。
+        # 机械臂姿态/外参稍有偏差时，真实可见目标会被算到狗身后，导致一直转圈。
         return 0.20 <= target.distance_hint_m <= 6.0
 
     @staticmethod
@@ -1019,6 +1213,15 @@ class AlgSolution:
                 "visual_correction": self.last_visual_correction,
                 "lidar_diag": self.last_lidar_diag,
                 "yolo_diag": self.last_yolo_diag,
+                "control": {
+                    "velocity_command": self.current_velocity_commands.detach().cpu().numpy().reshape(-1).tolist(),
+                    "turn_target_yaw": None if self.turn_target_yaw is None else float(self.turn_target_yaw),
+                    "near_sweep_accum_yaw": float(self.near_sweep_accum_yaw),
+                    "far_search_accum_yaw": float(self.far_search_accum_yaw),
+                    "far_search_yaw_rate": float(self.far_search_yaw_rate),
+                    "face_near_prealign_accum_yaw": float(self.face_near_prealign_accum_yaw),
+                    "face_near_prealign_steps": int(self.face_near_prealign_steps),
+                },
                 "trash": {
                     "target_count": len(self.trash_targets),
                     "current_target": (
@@ -1028,6 +1231,13 @@ class AlgSolution:
                     ),
                     "servo": self.current_trash_servo,
                     "ready_to_grasp_steps": int(self.ready_to_grasp_steps),
+                    "approach_target_lost_steps": int(self.approach_target_lost_steps),
+                    "far_locked_target": (
+                        None
+                        if self.far_locked_target is None
+                        else self.far_locked_target.to_debug_dict()
+                    ),
+                    "far_locked_miss_steps": int(self.far_locked_miss_steps),
                 },
                 "prior_errors": self.prior_errors,
             }

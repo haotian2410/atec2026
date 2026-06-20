@@ -1,8 +1,15 @@
-"""TaskB YOLO 目标数据桥接。
+"""TaskB YOLO 目标数据桥接和视觉伺服工具。
 
 本模块不直接跑 YOLO，只定义“检测程序 -> solution.py 状态机”的 JSON 契约，
 并把检测框、深度、扫描角度转换为排序后的 TrashTarget。这样检测模型可以
 由队友单独替换，主控制循环只需要轮询 JSON。
+
+主要职责：
+- load_yolo_targets(): 从本次 scan_dir 的 yolo_results.json 读取检测结果；
+- fill_depth_from_saved_images(): 从同名 depth.npy 补齐 bbox 中心深度；
+- detections_to_targets(): 将 bbox/depth 转为 TrashTarget，并估计 point_body/world_xy；
+- servo_command_from_target(): 将当前目标转换为底盘速度。远距离 ee 用粗接近，
+  近距离 head/body 以横移和前后为主、少旋转，并把垃圾调到本体视角中下部。
 """
 
 from __future__ import annotations
@@ -226,19 +233,27 @@ def servo_command_from_target(target: TrashTarget) -> dict[str, float | bool | s
     """根据目标框偏差生成保守的底盘速度指令。
 
     行走策略使用机器人本体系速度：+x 前进、+y 向左、+yaw 逆时针。
-    图像偏差 +x 表示目标在画面右侧，因此横向指令为负，yaw 也向右微调。
+    远距离 ee 目标用于粗靠近；近距离 head/body 目标用于抓取预备位微调。
+    近距离阶段不追求画面中心，而是让垃圾落在 head 视角中下部：
+    - 横向误差主要用 lin_y 修正；
+    - 距离和竖直图像误差共同决定 lin_x；
+    - yaw_rate 只保留很小修正，避免旋转造成目标框跳动和定位误差放大。
     """
 
-    err_x, _err_y = target.image_error
+    err_x, err_y = target.image_error
     distance = target.distance_hint_m
     close = target.camera in ("head", "video", "body") and distance < 1.20
 
+    target_err_y = None
+    vertical_error = None
     if close:
-        # 本体相机近距离微调阶段以横移为主。
-        # yaw 只给很小修正，避免视角大幅旋转导致 YOLO 框和目标选择跳变。
-        forward = float(np.clip(0.45 * (distance - 0.45), -0.12, 0.35))
-        lateral = float(np.clip(-0.50 * err_x, -0.28, 0.28))
-        yaw_rate = float(np.clip(-0.05 * err_x, -0.04, 0.04))
+        # 本体相机近距离微调以横移和前后为主，尽量少转。目标点设在画面中下部，
+        # 这样垃圾处在低位 head 相机里更接近抓取预备视角。
+        target_err_y = 0.48
+        vertical_error = err_y - target_err_y
+        forward = float(np.clip(0.28 * (distance - 0.72) - 0.12 * vertical_error, -0.10, 0.20))
+        lateral = float(np.clip(0.42 * err_x, -0.22, 0.22))
+        yaw_rate = float(np.clip(-0.08 * err_x, -0.05, 0.05))
     else:
         forward = float(np.clip(0.55 * (distance - 0.9), 0.0, 0.75))
         lateral = float(np.clip(-0.35 * err_x, -0.35, 0.35))
@@ -246,8 +261,9 @@ def servo_command_from_target(target: TrashTarget) -> dict[str, float | bool | s
 
     ready = (
         target.camera in ("head", "video", "body")
-        and abs(err_x) < 0.25
-        and 0.35 <= distance <= 1.25
+        and abs(err_x) < 0.14
+        and 0.30 <= err_y <= 0.68
+        and 0.55 <= distance <= 0.98
     )
     if ready:
         forward = lateral = yaw_rate = 0.0
@@ -258,6 +274,8 @@ def servo_command_from_target(target: TrashTarget) -> dict[str, float | bool | s
         "yaw_rate": yaw_rate,
         "ready_to_grasp": bool(ready),
         "mode": "head_precise" if close else "ee_or_far_rough",
+        "target_err_y": target_err_y,
+        "vertical_error": vertical_error,
     }
 
 
