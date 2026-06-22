@@ -2,7 +2,7 @@ import gymnasium as gym
 
 from .terrain import TASK_D_TERRAIN_CFG
 from .env_cfg import TaskDEnvCfg, TaskDEnvB2Cfg, TaskDEnvTron2ALeggedCfg, TaskDEnvTron2AWheelCfg
-from .rl_env_cfg import TaskDRLEnvB2Cfg, TaskDRLEnvB2ClimbCfg, TaskDRLEnvB2DropCfg, TaskDRLEnvB2PushCfg, TaskDRLEnvB2FullCfg
+from .rl_env_cfg import TaskDRLEnvB2Cfg, TaskDRLEnvB2ClimbCfg, TaskDRLEnvB2DropCfg, TaskDRLEnvB2PushCfg, TaskDRLEnvB2MixedCfg, TaskDRLEnvB2FullCfg
 from . import agents
 
 
@@ -93,6 +93,16 @@ gym.register(
 )
 
 gym.register(
+    id="ATEC-TaskD-RL-B2Piper-Mixed-v0",
+    entry_point="atec_rl_lab.tasks.task_base.envs_base:BaseRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.rl_env_cfg:TaskDRLEnvB2MixedCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:TaskDB2PPORunnerCfg",
+    },
+)
+
+gym.register(
     id="ATEC-TaskD-RL-B2Piper-Full-v0",
     entry_point="atec_rl_lab.tasks.task_base.envs_base:BaseRLEnv",
     disable_env_checker=True,
@@ -112,4 +122,4 @@ gym.register(
     },
 )
 
-__all__ = ['TaskDEnvCfg', 'TaskDEnvB2Cfg', 'TaskDEnvTron2ALeggedCfg', 'TaskDEnvTron2AWheelCfg', 'TaskDRLEnvB2Cfg', 'TaskDRLEnvB2ClimbCfg', 'TaskDRLEnvB2DropCfg', 'TaskDRLEnvB2PushCfg', 'TaskDRLEnvB2FullCfg']
+__all__ = ['TaskDEnvCfg', 'TaskDEnvB2Cfg', 'TaskDEnvTron2ALeggedCfg', 'TaskDEnvTron2AWheelCfg', 'TaskDRLEnvB2Cfg', 'TaskDRLEnvB2ClimbCfg', 'TaskDRLEnvB2DropCfg', 'TaskDRLEnvB2PushCfg', 'TaskDRLEnvB2MixedCfg', 'TaskDRLEnvB2FullCfg']

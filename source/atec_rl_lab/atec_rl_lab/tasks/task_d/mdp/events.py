@@ -50,6 +50,7 @@ def reset_task_d_stage(
     stage: str = "full",
     robot_default_z: float = 0.8,
     box_default_z: float = 0.5,
+    mixed_stage_weights: dict[str, float] | None = None,
 ):
     """Reset Task-D robot and box for staged fixed-map curriculum training."""
     if env_ids is None:
@@ -57,6 +58,31 @@ def reset_task_d_stage(
 
     robot: Articulation = env.scene["robot"]
     box: RigidObject = env.scene["box"]
+
+    if stage == "mixed":
+        if mixed_stage_weights is None:
+            mixed_stage_weights = {"push": 0.35, "climb": 0.30, "drop": 0.20, "full": 0.15}
+        stage_names = tuple(mixed_stage_weights.keys())
+        if len(stage_names) == 0:
+            raise ValueError("mixed_stage_weights must contain at least one stage.")
+        if any(name not in ("push", "climb", "drop", "full") for name in stage_names):
+            raise ValueError(f"Unsupported Task-D mixed reset stages: {stage_names}")
+        weights = torch.tensor([float(mixed_stage_weights[name]) for name in stage_names], device=env.device)
+        if torch.any(weights < 0.0) or float(weights.sum().item()) <= 0.0:
+            raise ValueError("mixed_stage_weights must be non-negative and sum to a positive value.")
+        sampled = torch.multinomial(weights / weights.sum(), len(env_ids), replacement=True)
+        for stage_index, stage_name in enumerate(stage_names):
+            selected = env_ids[sampled == stage_index]
+            if len(selected) == 0:
+                continue
+            reset_task_d_stage(
+                env,
+                selected,
+                stage=stage_name,
+                robot_default_z=robot_default_z,
+                box_default_z=box_default_z,
+            )
+        return
 
     if stage == "climb":
         robot_pos = ((-1.85, -1.75), (1.55, 1.65), robot_default_z)
