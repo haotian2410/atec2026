@@ -10,7 +10,7 @@ from demo.solution import AlgSolution
 from demo.tool.yolo_targets import TrashTarget, servo_command_from_target
 
 
-def make_target(*, err_x: float, err_y: float, distance: float, source_image: str = "live_000010_head_rgb.png"):
+def make_target(*, err_x: float, err_y: float, distance: float, source_image: str = "live_000010_head_rgb.png", confidence: float = 0.9):
     w, h = 640, 480
     cx = 0.5 * w + err_x * 0.5 * w
     cy = 0.5 * h + err_y * 0.5 * h
@@ -19,7 +19,7 @@ def make_target(*, err_x: float, err_y: float, distance: float, source_image: st
         target_id="head_00",
         camera="head",
         label="trash",
-        confidence=0.9,
+        confidence=confidence,
         bbox_xyxy=(cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2),
         image_size=(w, h),
         image_error=(err_x, err_y),
@@ -62,6 +62,30 @@ class TaskBLogicTest(unittest.TestCase):
         b = AlgSolution._ready_target_key(make_target(err_x=0.45, err_y=0.55, distance=0.8))
         self.assertTrue(AlgSolution._ready_target_matches(None, a))
         self.assertFalse(AlgSolution._ready_target_matches(a, b))
+
+
+    def test_body_target_selection_prefers_locked_match_over_closer_switch(self):
+        obj = object.__new__(AlgSolution)
+        locked = make_target(err_x=0.05, err_y=0.55, distance=0.9, source_image="live_000010_head_rgb.png")
+        match = make_target(err_x=0.08, err_y=0.56, distance=0.92, source_image="live_000013_head_rgb.png")
+        distractor = make_target(err_x=0.55, err_y=0.55, distance=0.7, source_image="live_000013_head_rgb.png", confidence=0.99)
+        obj.locked_trash_target = locked
+        obj.locked_trash_miss_steps = 0
+        chosen = obj._choose_latest_body_target([match, distractor])
+        self.assertIs(chosen, match)
+
+    def test_ready_count_can_accumulate_same_live_result_for_slow_yolo(self):
+        target = make_target(err_x=0.1, err_y=0.55, distance=0.8)
+        key = AlgSolution._ready_target_key(target)
+        steps = 0
+        last_key = None
+        for _ in range(3):
+            if AlgSolution._ready_target_matches(last_key, key):
+                steps += 1
+            else:
+                steps = 1
+            last_key = key
+        self.assertEqual(steps, 3)
 
     def test_stale_restart_uses_threshold_and_backoff(self):
         obj = object.__new__(AlgSolution)

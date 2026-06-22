@@ -259,6 +259,8 @@ class AlgSolution:
         self.yolo_stale_restart_threshold = int(os.environ.get("TASKB_YOLO_STALE_RESTART_COUNT", "3"))
         self.yolo_restart_backoff_s = float(os.environ.get("TASKB_YOLO_RESTART_BACKOFF_S", "2.0"))
         self.last_yolo_restart_time = -1.0
+        self.trash_debug_history = []
+        self.trash_debug_history_limit = 80
 
         # 垃圾搜索分层：
         # 1. near sweep：背向投放区扫有效扇区，只接受 head/body 近目标或很近 ee 目标；
@@ -703,13 +705,12 @@ class AlgSolution:
             self.approach_target_lost_steps = 0
             servo = self._compute_trash_servo_command(self.current_trash_target)
             self.current_trash_servo = dict(servo)
+            self._record_trash_debug_event(self.current_trash_target, servo)
             if servo.get("ready_to_grasp"):
                 image_key = self._target_image_key(self.current_trash_target)
                 target_key = self._ready_target_key(self.current_trash_target)
-                if (
-                    image_key != self.ready_to_grasp_last_image
-                    and self._ready_target_matches(self.ready_to_grasp_last_target, target_key)
-                ):
+                same_target = self._ready_target_matches(self.ready_to_grasp_last_target, target_key)
+                if same_target:
                     self.ready_to_grasp_steps += 1
                 else:
                     self.ready_to_grasp_steps = 1
@@ -1119,7 +1120,11 @@ class AlgSolution:
             return None
         latest_step = max(self._target_live_step(t) for t in targets)
         latest = [t for t in targets if self._target_live_step(t) == latest_step]
-        chosen = min(latest, key=lambda t: (t.distance_hint_m, abs(t.image_error[0]), -t.confidence))
+        locked_match = self._match_locked_target(latest)
+        if locked_match is not None:
+            chosen = locked_match
+        else:
+            chosen = min(latest, key=lambda t: (t.distance_hint_m, abs(t.image_error[0]), -t.confidence))
         self.locked_trash_target = chosen
         self.locked_trash_miss_steps = 0
         return chosen
@@ -1227,6 +1232,36 @@ class AlgSolution:
         pd = float(previous.get("distance", 0.0))
         cd = float(current.get("distance", 0.0))
         return abs(pd - cd) <= 0.35
+
+    def _record_trash_debug_event(self, target, servo):
+        try:
+            event = {
+                "step": int(self.step_count),
+                "phase": self.phase,
+                "mode": self.trash_servo_mode,
+                "ready_to_grasp_steps": int(self.ready_to_grasp_steps),
+                "servo": None if servo is None else {
+                    "ready_to_grasp": bool(servo.get("ready_to_grasp", False)),
+                    "hold_for_grasp": bool(servo.get("hold_for_grasp", False)),
+                    "lin_x": float(servo.get("lin_x", 0.0)),
+                    "lin_y": float(servo.get("lin_y", 0.0)),
+                    "yaw_rate": float(servo.get("yaw_rate", 0.0)),
+                },
+                "target": None if target is None else {
+                    "camera": target.camera,
+                    "label": target.label,
+                    "source_image": target.source_image,
+                    "image_error": list(target.image_error),
+                    "distance_hint_m": float(target.distance_hint_m),
+                    "confidence": float(target.confidence),
+                    "bbox_xyxy": list(target.bbox_xyxy),
+                },
+            }
+            self.trash_debug_history.append(event)
+            if len(self.trash_debug_history) > self.trash_debug_history_limit:
+                self.trash_debug_history = self.trash_debug_history[-self.trash_debug_history_limit:]
+        except Exception:
+            pass
 
     def _lock_or_choose_far_target(self, candidates):
         if not candidates:
@@ -1481,6 +1516,7 @@ class AlgSolution:
                         else self.far_locked_target.to_debug_dict()
                     ),
                     "far_locked_miss_steps": int(self.far_locked_miss_steps),
+                    "debug_history": list(getattr(self, "trash_debug_history", [])),
                 },
                 "prior_errors": self.prior_errors,
             }
