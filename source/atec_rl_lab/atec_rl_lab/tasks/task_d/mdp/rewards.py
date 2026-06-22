@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Sequence
 
 import isaaclab.sim as sim_utils
 from isaaclab.managers.manager_base import ManagerTermBase
+from isaaclab.managers import SceneEntityCfg
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -350,3 +351,148 @@ class RewardBoxXInRange(ManagerTermBase):
 
         return reward
 
+class RobotForwardProgress(ManagerTermBase):  # 机器人 x 方向“增量进度”奖励，只在本步比上步更靠近终点时给分。
+    def __init__(self, cfg, env):  # 初始化奖励项，IsaacLab 会在 reward manager 创建时调用。
+        super().__init__(cfg, env)  # 初始化 ManagerTermBase，获得 num_envs、device 等基础字段。
+        self._prev_progress = torch.zeros(self._env.num_envs, dtype=torch.float32, device=self._env.device)  # 记录上一帧归一化进度。
+
+    def reset(self, env_ids=None):  # episode reset 时同步上一帧进度，避免 reset 后第一步凭当前位置刷奖励。
+        if env_ids is None:  # 如果没有指定 env_ids，则重置全部环境。
+            env_ids = torch.arange(self._env.num_envs, device=self._env.device)  # 构造全部环境 id。
+        robot = self._env.scene["robot"]  # 读取 robot，用当前位置初始化 prev_progress。
+        x = robot.data.root_pos_w[env_ids, 0]  # 读取 reset 后 robot x。
+        self._prev_progress[env_ids] = torch.clamp((x - (-3.0)) / max(3.5 - (-3.0), 1.0e-6), 0.0, 1.0)  # 写入当前进度。
+
+    def __call__(  # 每个仿真 step 计算一次增量奖励。
+        self,
+        env: ManagerBasedRLEnv,  # 当前 ManagerBased RL 环境。
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),  # 指定读取 robot articulation。
+        start_x: float = -3.0,  # robot 初始 x 附近。
+        end_x: float = 3.5,  # 任务 D 终点 x。
+    ) -> torch.Tensor:  # 返回每个并行环境一个 reward。
+        robot = env.scene[asset_cfg.name]  # 从场景中取出 robot。
+        x = robot.data.root_pos_w[:, 0]  # 读取 robot 当前 x。
+        progress = torch.clamp((x - float(start_x)) / max(float(end_x - start_x), 1.0e-6), 0.0, 1.0)  # 当前归一化进度。
+        reward = torch.clamp(progress - self._prev_progress, min=0.0)  # 只奖励正向增量，停住或后退不给分。
+        self._prev_progress[:] = progress  # 更新上一帧进度，供下一步计算增量。
+        return reward  # 返回增量奖励。
+
+
+class BoxForwardProgress(ManagerTermBase):  # 箱子 x 方向“增量进度”奖励，只在箱子被向垫高目标推进时给分。
+    def __init__(self, cfg, env):  # 初始化奖励项。
+        super().__init__(cfg, env)  # 初始化 ManagerTermBase。
+        self._prev_progress = torch.zeros(self._env.num_envs, dtype=torch.float32, device=self._env.device)  # 记录上一帧箱子进度。
+
+    def reset(self, env_ids=None):  # episode reset 时同步箱子上一帧进度。
+        if env_ids is None:  # 如果没有指定 env_ids。
+            env_ids = torch.arange(self._env.num_envs, device=self._env.device)  # 使用全部环境 id。
+        box = self._env.scene["box"]  # 读取箱子对象。
+        x = box.data.root_pos_w[env_ids, 0]  # 读取 reset 后箱子 x。
+        self._prev_progress[env_ids] = torch.clamp((x - (-3.0)) / max(-1.0 - (-3.0), 1.0e-6), 0.0, 1.0)  # 写入当前箱子进度。
+
+    def __call__(  # 每步计算箱子向目标 x 推进的增量。
+        self,
+        env: ManagerBasedRLEnv,  # 当前环境。
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("box"),  # 指定读取 box。
+        start_x: float = -3.0,  # 箱子初始 x。
+        target_x: float = -1.0,  # 箱子垫高目标 x。
+    ) -> torch.Tensor:  # 返回每个并行环境一个 reward。
+        box = env.scene[asset_cfg.name]  # 从场景中取出箱子。
+        x = box.data.root_pos_w[:, 0]  # 读取箱子当前 x。
+        progress = torch.clamp((x - float(start_x)) / max(float(target_x - start_x), 1.0e-6), 0.0, 1.0)  # 当前箱子进度。
+        reward = torch.clamp(progress - self._prev_progress, min=0.0)  # 只奖励本步新增进度，停住不刷分。
+        self._prev_progress[:] = progress  # 更新上一帧箱子进度。
+        return reward  # 返回增量奖励。
+
+
+def box_to_step_target(  # 箱子接近指定垫高位置的连续奖励；权重较低时可作为形状引导。
+    env: ManagerBasedRLEnv,  # 当前 ManagerBased RL 环境。
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("box"),  # 指定读取 box。
+    target_xy: tuple[float, float] = (-1.0, 1.6),  # 指定箱子垫高目标位置。
+    std: float = 0.8,  # 指数奖励的距离尺度。
+) -> torch.Tensor:  # 返回每个并行环境一个 reward tensor。
+    box = env.scene[asset_cfg.name]  # 从场景中取出箱子。
+    target = torch.tensor(target_xy, device=box.data.root_pos_w.device, dtype=box.data.root_pos_w.dtype)  # 目标 xy tensor。
+    error = torch.sum(torch.square(box.data.root_pos_w[:, :2] - target.unsqueeze(0)), dim=1)  # 箱子到目标的 xy 平方距离。
+    return torch.exp(-error / (float(std) ** 2))  # 距离越近奖励越接近 1。
+
+
+def robot_near_box(  # 机器人靠近箱子的连续奖励，降低早期探索难度。
+    env: ManagerBasedRLEnv,  # 当前环境。
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),  # robot 实体配置。
+    box_cfg: SceneEntityCfg = SceneEntityCfg("box"),  # box 实体配置。
+    std: float = 1.2,  # 距离尺度。
+) -> torch.Tensor:  # 返回 reward tensor。
+    robot = env.scene[robot_cfg.name]  # 读取 robot。
+    box = env.scene[box_cfg.name]  # 读取 box。
+    error = torch.sum(torch.square(robot.data.root_pos_w[:, :2] - box.data.root_pos_w[:, :2]), dim=1)  # robot-box xy 距离平方。
+    return torch.exp(-error / (float(std) ** 2))  # 指数接近奖励。
+
+
+class RobotOnBoxOnce(ManagerTermBase):  # 一次性“机器人上箱子”奖励，并且要求箱子已接近垫高目标位置。
+    def __init__(self, cfg, env):  # 初始化奖励项。
+        super().__init__(cfg, env)  # 初始化 ManagerTermBase。
+        self._reward_given = torch.zeros(self._env.num_envs, dtype=torch.bool, device=self._env.device)  # 记录每个 env 是否已经给过上箱子奖励。
+
+    def reset(self, env_ids=None):  # episode reset 时清空一次性奖励状态。
+        if env_ids is None:  # 如果没有指定 env_ids。
+            self._reward_given.fill_(False)  # 清空全部环境状态。
+        else:  # 只 reset 部分环境。
+            self._reward_given[env_ids] = False  # 清空指定环境状态。
+
+    def __call__(  # 每步判断是否首次满足“箱子到位 + 机器人上箱子”。
+        self,
+        env: ManagerBasedRLEnv,  # 当前环境。
+        robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),  # robot 实体。
+        box_cfg: SceneEntityCfg = SceneEntityCfg("box"),  # box 实体。
+        target_xy: tuple[float, float] = (-1.0, 1.6),  # 箱子垫高目标位置。
+        box_ready_radius: float = 0.25,  # 箱子离目标多近才允许给上箱子奖励。
+        xy_half_extents: tuple[float, float] = (0.55, 0.65),  # robot base 投影在箱子附近的 xy 判定范围。
+        min_height_above_box: float = 0.45,  # robot base 必须明显高于箱子中心，避免贴箱子侧面刷分。
+    ) -> torch.Tensor:  # 返回一次性 reward tensor。
+        robot = env.scene[robot_cfg.name]  # 读取 robot。
+        box = env.scene[box_cfg.name]  # 读取 box。
+        target = torch.tensor(target_xy, device=box.data.root_pos_w.device, dtype=box.data.root_pos_w.dtype)  # 目标 xy tensor。
+        box_dist = torch.linalg.norm(box.data.root_pos_w[:, :2] - target.unsqueeze(0), dim=1)  # 箱子到垫高目标的 xy 距离。
+        box_ready = box_dist < float(box_ready_radius)  # 只有箱子接近目标位置后，才允许上箱子奖励。
+        delta_xy = torch.abs(robot.data.root_pos_w[:, :2] - box.data.root_pos_w[:, :2])  # robot base 与箱子中心 xy 距离。
+        within_xy = (delta_xy[:, 0] < float(xy_half_extents[0])) & (delta_xy[:, 1] < float(xy_half_extents[1]))  # 判断 robot 是否在箱子投影附近。
+        above = robot.data.root_pos_w[:, 2] > box.data.root_pos_w[:, 2] + float(min_height_above_box)  # 判断 robot 是否高于箱子。
+        condition = box_ready & within_xy & above  # 上箱子奖励的完整条件。
+        trigger = condition & (~self._reward_given)  # 只在第一次满足条件时触发。
+        self._reward_given |= condition  # 一旦满足过条件，就标记已给奖励。
+        return trigger.to(robot.data.root_pos_w.dtype)  # bool 转 float，满足首次条件给 1。
+
+
+class RobotOnPlatformSideOnce(ManagerTermBase):  # 一次性“机器人到达平台侧/高台区域”奖励。
+    def __init__(self, cfg, env):  # 初始化奖励项。
+        super().__init__(cfg, env)  # 初始化 ManagerTermBase。
+        self._reward_given = torch.zeros(self._env.num_envs, dtype=torch.bool, device=self._env.device)  # 记录是否已经给过平台奖励。
+
+    def reset(self, env_ids=None):  # episode reset 时清空一次性奖励状态。
+        if env_ids is None:  # 如果 reset 全部环境。
+            self._reward_given.fill_(False)  # 清空全部状态。
+        else:  # 如果 reset 部分环境。
+            self._reward_given[env_ids] = False  # 清空指定 env 状态。
+
+    def __call__(  # 每步判断是否首次到达平台侧。
+        self,
+        env: ManagerBasedRLEnv,  # 当前环境。
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),  # robot 实体。
+        min_x: float = -0.2,  # x 方向必须已经越过坑/平台前缘附近。
+        min_z: float = 1.35,  # base 高度阈值；平台 1.0-1.2m，B2 站立 base 应明显高于 1.25m。
+        target_y: float = 1.6,  # 固定垫高策略的右侧路线 y 位置。
+        y_half_width: float = 1.4,  # y 容差，避免策略在错误侧或掉坑时刷平台奖励。
+        max_projected_gravity_xy: float = 0.8,  # 姿态稳定性阈值，避免翻倒状态也拿平台奖励。
+    ) -> torch.Tensor:  # 返回一次性 reward tensor。
+        robot = env.scene[asset_cfg.name]  # 读取 robot。
+        root_pos = robot.data.root_pos_w  # 读取 robot root 世界坐标。
+        in_x = root_pos[:, 0] > float(min_x)  # x 必须到达平台侧。
+        in_y = torch.abs(root_pos[:, 1] - float(target_y)) < float(y_half_width)  # y 必须在固定右侧路线附近。
+        high_enough = root_pos[:, 2] > float(min_z)  # base 高度必须足够高，避免普通站立或坑内状态刷分。
+        gravity_xy = torch.linalg.norm(robot.data.projected_gravity_b[:, :2], dim=1)  # projected gravity xy 越小表示越接近直立。
+        stable = gravity_xy < float(max_projected_gravity_xy)  # 姿态不能过度倾斜/翻倒。
+        condition = in_x & in_y & high_enough & stable  # 平台奖励完整条件。
+        trigger = condition & (~self._reward_given)  # 只在第一次满足时触发。
+        self._reward_given |= condition  # 标记已给奖励。
+        return trigger.to(root_pos.dtype)  # bool 转 float。
