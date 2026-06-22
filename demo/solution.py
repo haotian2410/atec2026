@@ -232,6 +232,7 @@ class AlgSolution:
         self.body_target_lost_steps = 0
         self.ee_target_lost_steps = 0
         self.approach_target_lost_steps = 0
+        self.last_yolo_empty_step = -1
         self.live_frame_interval = 3
         self.last_live_frame_step = -1
         self.yolo_enabled = os.environ.get("ATEC_DISABLE_EMBEDDED_YOLO", "0") != "1"
@@ -680,14 +681,23 @@ class AlgSolution:
             # 3. 如果本体相机当前看不到垃圾，再使用 live/scan ee 的深度和坐标粗靠近；
             # 4. 一旦本体相机重新识别到目标，排序会自动切回本体相机微调姿态。
             self._save_live_servo_frame(obs)
+            before_refresh_empty_step = self.last_yolo_empty_step
             self._refresh_yolo_targets()
+            refreshed_empty = self.last_yolo_empty_step != before_refresh_empty_step
             if self.trash_targets:
                 self.current_trash_target = self._select_approach_target(self.trash_targets)
             if self.current_trash_target is None:
-                # 近距离 head 目标在转动/靠近时可能短暂掉框。先停住等 YOLO 重捕获，
-                # 不要几帧空结果就回到搜索转圈；超过短暂窗口后再退到远搜。
+                # 近距离 head 目标在转动/靠近时可能短暂掉框。只有在 YOLO 没有明确
+                # 写出空结果、且旧 live 目标仍足够新时，才短暂停住等重捕获。
                 self.approach_target_lost_steps += 1
-                if previous_target is not None and self.approach_target_lost_steps <= 15:
+                previous_lag = self._target_image_lag_steps(previous_target)
+                can_hold_previous = (
+                    previous_target is not None
+                    and not refreshed_empty
+                    and self.approach_target_lost_steps <= 15
+                    and (previous_lag is None or previous_lag <= self.yolo_max_live_lag_steps)
+                )
+                if can_hold_previous:
                     self.current_trash_target = previous_target
                     self.ready_to_grasp_steps = 0
                     self.ready_to_grasp_last_image = None
@@ -850,6 +860,7 @@ class AlgSolution:
         if not os.path.exists(runner_script):
             return False
         try:
+            self._stop_stale_yolo_processes()
             os.makedirs(os.path.dirname(self.pose_state_path), exist_ok=True)
             log_path = os.path.join(self.project_root, "outputs", "taskb_yolo_runner.log")
             self.yolo_log_handle = open(log_path, "a", encoding="utf-8")
@@ -889,6 +900,27 @@ class AlgSolution:
         except Exception as err:
             self.yolo_start_error = f"{self.yolo_start_error}; subprocess: {err!r}"
             return False
+
+    def _stop_stale_yolo_processes(self):
+        try:
+            current_pid = None if self.yolo_process is None else self.yolo_process.pid
+            marker = os.path.join(self.project_root, "demo", "tool", "taskb_yolo_runner.py")
+            output = subprocess.check_output(["ps", "-eo", "pid=,args="], text=True)
+            for line in output.splitlines():
+                parts = line.strip().split(None, 1)
+                if len(parts) != 2:
+                    continue
+                pid = int(parts[0])
+                args = parts[1]
+                if pid == os.getpid() or pid == current_pid:
+                    continue
+                if marker in args:
+                    try:
+                        os.kill(pid, 15)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     def _stop_yolo_runner(self):
         if self.yolo_stop_event is not None:
@@ -1028,6 +1060,7 @@ class AlgSolution:
                     return
                 self.far_locked_target = None
                 self.far_locked_miss_steps = 0
+            self.last_yolo_empty_step = self.step_count
             self._clear_yolo_targets(reason="empty_yolo_result")
 
     def _clear_yolo_targets(self, reason: str):
@@ -1510,6 +1543,7 @@ class AlgSolution:
                     "ready_to_grasp_last_image": self.ready_to_grasp_last_image,
                     "ready_to_grasp_last_target": self.ready_to_grasp_last_target,
                     "approach_target_lost_steps": int(self.approach_target_lost_steps),
+                    "last_yolo_empty_step": int(getattr(self, "last_yolo_empty_step", -1)),
                     "far_locked_target": (
                         None
                         if self.far_locked_target is None

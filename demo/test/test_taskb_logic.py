@@ -87,6 +87,16 @@ class TaskBLogicTest(unittest.TestCase):
             last_key = key
         self.assertEqual(steps, 3)
 
+
+    def test_old_live_target_lag_exceeds_reuse_window(self):
+        obj = object.__new__(AlgSolution)
+        obj.step_count = 100
+        obj.yolo_max_live_lag_steps = 15
+        stale = make_target(err_x=0.1, err_y=0.55, distance=0.8, source_image="live_000070_head_rgb.png")
+        fresh = make_target(err_x=0.1, err_y=0.55, distance=0.8, source_image="live_000090_head_rgb.png")
+        self.assertGreater(obj._target_image_lag_steps(stale), obj.yolo_max_live_lag_steps)
+        self.assertLessEqual(obj._target_image_lag_steps(fresh), obj.yolo_max_live_lag_steps)
+
     def test_stale_restart_uses_threshold_and_backoff(self):
         obj = object.__new__(AlgSolution)
         obj.last_yolo_diag = {}
