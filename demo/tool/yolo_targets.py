@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import json
 import math
 import os
+import time
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -85,6 +86,7 @@ class TrashTarget:
     image_size: tuple[int, int]
     image_error: tuple[float, float]
     depth_m: float | None
+    has_valid_depth: bool
     distance_hint_m: float
     world_xy: tuple[float, float] | None
     scan_angle_deg: float | None
@@ -104,6 +106,7 @@ class TrashTarget:
             "image_size": list(self.image_size),
             "image_error": list(self.image_error),
             "depth_m": None if self.depth_m is None else float(self.depth_m),
+            "has_valid_depth": bool(self.has_valid_depth),
             "distance_hint_m": float(self.distance_hint_m),
             "world_xy": None if self.world_xy is None else list(self.world_xy),
             "scan_angle_deg": self.scan_angle_deg,
@@ -148,6 +151,13 @@ def load_yolo_targets(project_root: str | os.PathLike, scan_dir: str | os.PathLi
     except Exception as err:
         return [], {"available": False, "reason": f"read_error: {err}", "path": str(result_path)}
 
+    meta = data.get("meta", {}) if isinstance(data, dict) else {}
+    updated_at = meta.get("updated_at") if isinstance(meta, dict) else None
+    try:
+        updated_at = None if updated_at is None else float(updated_at)
+    except Exception:
+        updated_at = None
+
     detections = parse_detections(data)
     detections = fill_depth_from_saved_images(detections, result_path.parent, root)
     targets = detections_to_targets(
@@ -162,6 +172,8 @@ def load_yolo_targets(project_root: str | os.PathLike, scan_dir: str | os.PathLi
         "path": str(result_path),
         "detections": len(detections),
         "targets": len(targets),
+        "updated_at": updated_at,
+        "age_s": None if updated_at is None else max(0.0, time.time() - updated_at),
     }
 
 
@@ -210,6 +222,7 @@ def detections_to_targets(detections: list[YoloDetection], pose_xy: Iterable[flo
                 image_size=det.image_size,
                 image_error=det.image_error,
                 depth_m=det.depth_m,
+                has_valid_depth=det.depth_m is not None,
                 distance_hint_m=distance,
                 world_xy=world_xy,
                 scan_angle_deg=det.scan_angle_deg,
@@ -259,13 +272,18 @@ def servo_command_from_target(target: TrashTarget) -> dict[str, float | bool | s
         lateral = float(np.clip(-0.35 * err_x, -0.35, 0.35))
         yaw_rate = float(np.clip(-0.25 * err_x, -0.22, 0.22))
 
-    ready = (
+    hold_for_grasp = (
         target.camera in ("head", "video", "body")
-        and abs(err_x) < 0.14
-        and 0.30 <= err_y <= 0.68
-        and 0.55 <= distance <= 0.98
+        and target.has_valid_depth
+        and abs(err_x) < 0.72
+        and 0.24 <= err_y <= 1.05
+        and 0.52 <= distance <= 1.12
     )
-    if ready:
+    ready = hold_for_grasp and (
+        (abs(err_x) < 0.22 and 0.30 <= err_y <= 0.98)
+        or (0.80 <= err_y <= 1.05 and abs(err_x) < 0.72)
+    )
+    if hold_for_grasp:
         forward = lateral = yaw_rate = 0.0
 
     return {
@@ -273,6 +291,7 @@ def servo_command_from_target(target: TrashTarget) -> dict[str, float | bool | s
         "lin_y": lateral,
         "yaw_rate": yaw_rate,
         "ready_to_grasp": bool(ready),
+        "hold_for_grasp": bool(hold_for_grasp),
         "mode": "head_precise" if close else "ee_or_far_rough",
         "target_err_y": target_err_y,
         "vertical_error": vertical_error,
@@ -376,14 +395,16 @@ def _estimate_world_xy(det: YoloDetection, distance: float, pose: np.ndarray | N
         base = base_yaw if scan_base_yaw is None else float(scan_base_yaw)
         scan_yaw = prior.wrap_angle(base + math.radians(det.scan_angle_deg))
 
-    if point_body is not None:
+    err_x, _err_y = det.image_error
+    if point_body is not None and det.frame_kind != "live":
         pb = np.asarray(point_body, dtype=np.float64)
         c = math.cos(scan_yaw)
         s = math.sin(scan_yaw)
         world = pose + np.array([c * pb[0] - s * pb[1], s * pb[0] + c * pb[1]], dtype=np.float64)
         return (float(world[0]), float(world[1]))
-    err_x, _err_y = det.image_error
 
+    # live 目标的二维显示用与图像伺服一致的近似方位，避免 ee FK/外参误差
+    # 让可视化目标点和实际移动方向严重不一致。
     forward = distance
     lateral_left = -err_x * distance * 0.65
     c = math.cos(scan_yaw)

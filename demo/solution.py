@@ -194,7 +194,7 @@ class AlgSolution:
             self.project_root,
             "outputs",
             "taskb_scan",
-            time.strftime("%Y%m%d_%H%M%S"),
+            f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}",
         )
         self.pose_state_path = os.path.join(self.project_root, "outputs", "taskb_pose_state.json")
         self.lidar_debug_dir = os.path.join(self.project_root, "outputs", "taskb_lidar_debug")
@@ -220,6 +220,7 @@ class AlgSolution:
         self.last_yolo_diag = {"available": False, "reason": "not_checked"}
         self.ready_to_grasp_steps = 0
         self.ready_to_grasp_last_image = None
+        self.ready_to_grasp_last_target = None
         # PRONE_TRANSITION 的起始 step。为 None 表示当前还没开始趴下插值；
         # 一旦本体相机近距离微调确认 ready_to_grasp，会记录当前 step_count。
         self.prone_transition_start_step = None
@@ -245,7 +246,9 @@ class AlgSolution:
             )
         self.yolo_conf = float(os.environ.get("TASKB_YOLO_CONF", "0.25"))
         self.yolo_watch_interval = float(os.environ.get("TASKB_YOLO_INTERVAL", "0.35"))
-        self.yolo_max_live_per_camera = int(os.environ.get("TASKB_YOLO_MAX_LIVE", "3"))
+        self.yolo_max_live_per_camera = int(os.environ.get("TASKB_YOLO_MAX_LIVE", "1"))
+        self.yolo_max_result_age_s = float(os.environ.get("TASKB_YOLO_MAX_AGE_S", "1.2"))
+        self.yolo_max_live_lag_steps = int(os.environ.get("TASKB_YOLO_MAX_LIVE_LAG_STEPS", "15"))
         self.yolo_thread = None
         self.yolo_stop_event = None
         self.yolo_process = None
@@ -681,9 +684,12 @@ class AlgSolution:
                 if previous_target is not None and self.approach_target_lost_steps <= 15:
                     self.current_trash_target = previous_target
                     self.ready_to_grasp_steps = 0
+                    self.ready_to_grasp_last_image = None
+                    self.ready_to_grasp_last_target = None
                     return self._velocity_tensor(0.0, 0.0, 0.0)
                 self.ready_to_grasp_steps = 0
                 self.ready_to_grasp_last_image = None
+                self.ready_to_grasp_last_target = None
                 self.approach_target_lost_steps = 0
                 self.current_trash_servo = None
                 self.current_trash_target = None
@@ -695,9 +701,16 @@ class AlgSolution:
             self.current_trash_servo = dict(servo)
             if servo.get("ready_to_grasp") or servo.get("hold_for_grasp"):
                 image_key = self._target_image_key(self.current_trash_target)
-                if image_key != self.ready_to_grasp_last_image:
+                target_key = self._ready_target_key(self.current_trash_target)
+                if (
+                    image_key != self.ready_to_grasp_last_image
+                    and self._ready_target_matches(self.ready_to_grasp_last_target, target_key)
+                ):
                     self.ready_to_grasp_steps += 1
-                    self.ready_to_grasp_last_image = image_key
+                else:
+                    self.ready_to_grasp_steps = 1
+                self.ready_to_grasp_last_image = image_key
+                self.ready_to_grasp_last_target = target_key
                 if servo.get("ready_to_grasp") and self.ready_to_grasp_steps >= 3:
                     # 本体相机连续多帧确认目标已经位于可抓取区域：
                     # 先进入趴下过渡，让机身/相机/末端整体降低，再交给机械臂抓取。
@@ -708,6 +721,7 @@ class AlgSolution:
 
             self.ready_to_grasp_steps = 0
             self.ready_to_grasp_last_image = None
+            self.ready_to_grasp_last_target = None
             return self._velocity_tensor(
                 float(servo["lin_x"]),
                 float(servo["lin_y"]),
@@ -750,10 +764,35 @@ class AlgSolution:
 
 
     def _ensure_yolo_runner_started(self):
-        # YOLO 只启动一次。优先进程内后台线程，若主 Isaac 环境没装 ultralytics，
+        # YOLO 优先进程内后台线程，若主 Isaac 环境没装 ultralytics，
         # 自动退回到已安装的 atec-yolo conda 环境运行同一个 runner 脚本。
-        if not self.yolo_enabled or self.yolo_started:
+        if not self.yolo_enabled:
             return
+        if self.yolo_started:
+            if self.yolo_process is not None:
+                exit_code = self.yolo_process.poll()
+                if exit_code is None:
+                    return
+                self.last_yolo_diag = {
+                    "available": False,
+                    "reason": "yolo_subprocess_exited",
+                    "exit_code": int(exit_code),
+                }
+                self._stop_yolo_runner()
+                self.yolo_started = False
+                self.yolo_process = None
+                self.yolo_stop_event = None
+                self.yolo_thread = None
+            elif self.yolo_thread is not None:
+                if self.yolo_thread.is_alive():
+                    return
+                self.last_yolo_diag = {"available": False, "reason": "embedded_yolo_thread_exited"}
+                self._stop_yolo_runner()
+                self.yolo_started = False
+                self.yolo_stop_event = None
+                self.yolo_thread = None
+            else:
+                return
         if not os.path.exists(self.yolo_model_path):
             self.yolo_start_error = f"missing_model: {self.yolo_model_path}"
             self.last_yolo_diag = {"available": False, "reason": self.yolo_start_error}
@@ -943,6 +982,9 @@ class AlgSolution:
             scan_base_yaw=self.scan_base_heading,
         )
         self.last_yolo_diag = diag
+        if self._yolo_result_is_stale(diag, targets):
+            self._clear_yolo_targets(reason="stale_yolo_result")
+            return
         if targets:
             self.trash_targets = targets
             if self.phase not in ("NEAR_SWEEP_TRASH", "FAR_SEARCH_TRASH", "APPROACH_TRASH_TARGET"):
@@ -957,10 +999,31 @@ class AlgSolution:
                     return
                 self.far_locked_target = None
                 self.far_locked_miss_steps = 0
-            self.trash_targets = []
-            self.current_trash_target = None
-            self.locked_trash_target = None
-            self.locked_trash_miss_steps = 0
+            self._clear_yolo_targets(reason="empty_yolo_result")
+
+    def _clear_yolo_targets(self, reason: str):
+        self.trash_targets = []
+        self.current_trash_target = None
+        self.locked_trash_target = None
+        self.locked_trash_miss_steps = 0
+        self.ready_to_grasp_steps = 0
+        self.ready_to_grasp_last_image = None
+        self.ready_to_grasp_last_target = None
+        self.current_trash_servo = None
+        self.last_yolo_diag = {**getattr(self, "last_yolo_diag", {}), "control_action": reason}
+
+    def _yolo_result_is_stale(self, diag, targets) -> bool:
+        if not diag.get("available"):
+            return False
+        age_s = diag.get("age_s")
+        if age_s is None:
+            return False
+        if float(age_s) > self.yolo_max_result_age_s:
+            return True
+        live_steps = [self._target_live_step(t) for t in targets if getattr(t, "frame_kind", None) == "live"]
+        if live_steps and self.step_count - max(live_steps) > self.yolo_max_live_lag_steps:
+            return True
+        return False
 
 
     def _select_approach_target(self, targets):
@@ -1107,6 +1170,35 @@ class AlgSolution:
     def _target_image_lag_steps(self, target) -> int | None:
         step = self._target_live_step(target) if target is not None else -1
         return None if step < 0 else int(self.step_count - step)
+
+    @staticmethod
+    def _ready_target_key(target):
+        if target is None:
+            return None
+        x1, y1, x2, y2 = target.bbox_xyxy
+        w, h = target.image_size
+        return {
+            "camera": target.camera,
+            "label": target.label,
+            "center": ((x1 + x2) / max(2.0 * w, 1.0), (y1 + y2) / max(2.0 * h, 1.0)),
+            "distance": float(target.distance_hint_m),
+        }
+
+    @staticmethod
+    def _ready_target_matches(previous, current) -> bool:
+        if current is None:
+            return False
+        if previous is None:
+            return True
+        if previous.get("camera") != current.get("camera") or previous.get("label") != current.get("label"):
+            return False
+        pcx, pcy = previous.get("center", (0.0, 0.0))
+        ccx, ccy = current.get("center", (0.0, 0.0))
+        if float(np.hypot(pcx - ccx, pcy - ccy)) > 0.18:
+            return False
+        pd = float(previous.get("distance", 0.0))
+        cd = float(current.get("distance", 0.0))
+        return abs(pd - cd) <= 0.35
 
     def _lock_or_choose_far_target(self, candidates):
         if not candidates:
@@ -1353,6 +1445,7 @@ class AlgSolution:
                     "servo": self.current_trash_servo,
                     "ready_to_grasp_steps": int(self.ready_to_grasp_steps),
                     "ready_to_grasp_last_image": self.ready_to_grasp_last_image,
+                    "ready_to_grasp_last_target": self.ready_to_grasp_last_target,
                     "approach_target_lost_steps": int(self.approach_target_lost_steps),
                     "far_locked_target": (
                         None

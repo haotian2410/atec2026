@@ -234,10 +234,8 @@ def orange_depth_points_from_obs_with_camera(obs: dict):
     depth = image.get("head_depth")
     camera_name = "head"
     if rgb is None or depth is None:
-        rgb = image.get("video_rgb")
-        depth = image.get("video_depth")
-        camera_name = "head"  # video is only used as a base-fixed debug fallback.
-    if rgb is None or depth is None:
+        # Do not reuse head extrinsics for video frames. If video needs to drive
+        # localization, add an explicit video camera prior first.
         return None, None
 
     points = _orange_depth_points_from_arrays(rgb, depth, camera_name)
