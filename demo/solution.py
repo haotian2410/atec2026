@@ -255,6 +255,10 @@ class AlgSolution:
         self.yolo_log_handle = None
         self.yolo_started = False
         self.yolo_start_error = None
+        self.yolo_stale_count = 0
+        self.yolo_stale_restart_threshold = int(os.environ.get("TASKB_YOLO_STALE_RESTART_COUNT", "3"))
+        self.yolo_restart_backoff_s = float(os.environ.get("TASKB_YOLO_RESTART_BACKOFF_S", "2.0"))
+        self.last_yolo_restart_time = -1.0
 
         # 垃圾搜索分层：
         # 1. near sweep：背向投放区扫有效扇区，只接受 head/body 近目标或很近 ee 目标；
@@ -699,7 +703,7 @@ class AlgSolution:
             self.approach_target_lost_steps = 0
             servo = self._compute_trash_servo_command(self.current_trash_target)
             self.current_trash_servo = dict(servo)
-            if servo.get("ready_to_grasp") or servo.get("hold_for_grasp"):
+            if servo.get("ready_to_grasp"):
                 image_key = self._target_image_key(self.current_trash_target)
                 target_key = self._ready_target_key(self.current_trash_target)
                 if (
@@ -711,8 +715,8 @@ class AlgSolution:
                     self.ready_to_grasp_steps = 1
                 self.ready_to_grasp_last_image = image_key
                 self.ready_to_grasp_last_target = target_key
-                if servo.get("ready_to_grasp") and self.ready_to_grasp_steps >= 3:
-                    # 本体相机连续多帧确认目标已经位于可抓取区域：
+                if self.ready_to_grasp_steps >= 3:
+                    # 本体相机连续多帧确认同一目标已经位于可抓取区域：
                     # 先进入趴下过渡，让机身/相机/末端整体降低，再交给机械臂抓取。
                     # 这里不直接切 READY_TO_GRASP，是为了避免腿部动作瞬间跳到低姿态。
                     self.phase = "PRONE_TRANSITION"
@@ -778,25 +782,20 @@ class AlgSolution:
                     "reason": "yolo_subprocess_exited",
                     "exit_code": int(exit_code),
                 }
-                self._stop_yolo_runner()
-                self.yolo_started = False
-                self.yolo_process = None
-                self.yolo_stop_event = None
-                self.yolo_thread = None
+                self._mark_yolo_runner_stopped()
             elif self.yolo_thread is not None:
                 if self.yolo_thread.is_alive():
                     return
                 self.last_yolo_diag = {"available": False, "reason": "embedded_yolo_thread_exited"}
-                self._stop_yolo_runner()
-                self.yolo_started = False
-                self.yolo_stop_event = None
-                self.yolo_thread = None
+                self._mark_yolo_runner_stopped()
             else:
                 return
+        if not self._yolo_restart_allowed():
+            return
         if not os.path.exists(self.yolo_model_path):
             self.yolo_start_error = f"missing_model: {self.yolo_model_path}"
             self.last_yolo_diag = {"available": False, "reason": self.yolo_start_error}
-            self.yolo_started = True
+            self.last_yolo_restart_time = time.time()
             return
 
         self.yolo_stop_event = threading.Event()
@@ -812,7 +811,7 @@ class AlgSolution:
                     "reason": "embedded_yolo_start_failed",
                     "error": self.yolo_start_error,
                 }
-                self.yolo_started = True
+                self.last_yolo_restart_time = time.time()
             return
 
         self.yolo_thread = threading.Thread(
@@ -823,6 +822,8 @@ class AlgSolution:
         )
         self.yolo_thread.start()
         self.yolo_started = True
+        self.last_yolo_restart_time = time.time()
+        self.yolo_stale_count = 0
         self.last_yolo_diag = {
             "available": False,
             "reason": "embedded_yolo_started",
@@ -875,6 +876,8 @@ class AlgSolution:
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
+            self.last_yolo_restart_time = time.time()
+            self.yolo_stale_count = 0
             self.last_yolo_diag = {
                 "available": False,
                 "reason": "yolo_subprocess_started",
@@ -899,6 +902,26 @@ class AlgSolution:
                 self.yolo_log_handle.close()
             except Exception:
                 pass
+        self.yolo_log_handle = None
+
+    def _mark_yolo_runner_stopped(self):
+        self._stop_yolo_runner()
+        self.yolo_started = False
+        self.yolo_process = None
+        self.yolo_stop_event = None
+        self.yolo_thread = None
+
+    def _yolo_restart_allowed(self) -> bool:
+        last = float(getattr(self, "last_yolo_restart_time", -1.0))
+        return last < 0.0 or (time.time() - last) >= self.yolo_restart_backoff_s
+
+    def _request_yolo_restart(self, reason: str):
+        self.last_yolo_diag = {**getattr(self, "last_yolo_diag", {}), "restart_reason": reason}
+        if not self._yolo_restart_allowed():
+            return False
+        self._mark_yolo_runner_stopped()
+        self.last_yolo_restart_time = time.time()
+        return True
 
     def __del__(self):
         try:
@@ -983,8 +1006,13 @@ class AlgSolution:
         )
         self.last_yolo_diag = diag
         if self._yolo_result_is_stale(diag, targets):
+            self.yolo_stale_count += 1
             self._clear_yolo_targets(reason="stale_yolo_result")
+            if self.yolo_stale_count >= self.yolo_stale_restart_threshold:
+                self._request_yolo_restart("stale_yolo_result")
+                self.yolo_stale_count = 0
             return
+        self.yolo_stale_count = 0
         if targets:
             self.trash_targets = targets
             if self.phase not in ("NEAR_SWEEP_TRASH", "FAR_SEARCH_TRASH", "APPROACH_TRASH_TARGET"):

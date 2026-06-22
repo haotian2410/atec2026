@@ -279,12 +279,14 @@ def servo_command_from_target(target: TrashTarget) -> dict[str, float | bool | s
         and 0.24 <= err_y <= 1.05
         and 0.52 <= distance <= 1.12
     )
-    ready = hold_for_grasp and (
-        (abs(err_x) < 0.22 and 0.30 <= err_y <= 0.98)
-        or (0.80 <= err_y <= 1.05 and abs(err_x) < 0.72)
-    )
-    if hold_for_grasp:
+    ready = hold_for_grasp and abs(err_x) < 0.22 and 0.30 <= err_y <= 0.98
+    if ready:
         forward = lateral = yaw_rate = 0.0
+    elif hold_for_grasp:
+        # Hold is a slow refinement mode, not a state-machine stop condition.
+        forward = float(np.clip(forward, -0.05, 0.05))
+        lateral = float(np.clip(lateral, -0.08, 0.08))
+        yaw_rate = float(np.clip(yaw_rate, -0.02, 0.02))
 
     return {
         "lin_x": forward,
