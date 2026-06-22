@@ -6,6 +6,8 @@ import torch
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation, RigidObject
 
+from atec_rl_lab.tasks.task_d import constants as task_d_constants
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
@@ -73,11 +75,40 @@ def _debug_reset_positions(
         )
 
 
+def _write_b2_standing_joint_state(
+    robot: Articulation,
+    env_ids: torch.Tensor,
+    debug: bool = False,
+    debug_num_envs: int = 4,
+):
+    joint_pos = robot.data.default_joint_pos[env_ids].clone()
+    joint_vel = torch.zeros_like(robot.data.default_joint_vel[env_ids])
+    joint_names = list(getattr(robot, "joint_names", ()))
+    for joint_name, target_pos in task_d_constants.B2_STANDING_JOINT_POS.items():
+        if joint_name in joint_names:
+            joint_pos[:, joint_names.index(joint_name)] = float(target_pos)
+    robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
+
+    if debug and len(env_ids) > 0:
+        count = min(int(debug_num_envs), len(env_ids))
+        print(f"[TaskD reset joints] active_joint_names={joint_names}")
+        for i in range(count):
+            env_id = int(env_ids[i].item())
+            values = {name: float(joint_pos[i, j].item()) for j, name in enumerate(joint_names)}
+            print(f"[TaskD reset joints] env_id={env_id} joint_pos={values}")
+            limits = robot.data.soft_joint_pos_limits[env_ids[i]].detach().cpu()
+            limit_values = {
+                name: [float(limits[j, 0].item()), float(limits[j, 1].item())]
+                for j, name in enumerate(joint_names)
+            }
+            print(f"[TaskD reset joints] env_id={env_id} soft_limits={limit_values}")
+
+
 def reset_task_d_stage(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor | None,
     stage: str = "full",
-    robot_default_z: float = 0.8,
+    robot_default_z: float = task_d_constants.B2_STANDING_ROOT_Z,
     box_default_z: float = 0.5,
     mixed_stage_weights: dict[str, float] | None = None,
     debug: bool = False,
@@ -120,15 +151,45 @@ def reset_task_d_stage(
     # Local reset coordinates are relative to terrain origins, not terrain cell centers.
     # Task-D terrain origin is at original map coordinate (-3, 0), so fixed-map x coordinates are shifted by +3m.
     if stage == "climb":
-        robot_pos = ((1.15, 1.25), (1.55, 1.65), robot_default_z)
-        robot_yaw = (-0.08, 0.08)
-        box_pos = ((1.97, 2.03), (1.57, 1.63), box_default_z)
-        box_yaw = 0.0
+        robot_pos = (
+            (
+                task_d_constants.PRE_CLIMB_ROBOT_X - task_d_constants.PRE_CLIMB_ROBOT_HALF_WIDTH_X,
+                task_d_constants.PRE_CLIMB_ROBOT_X + task_d_constants.PRE_CLIMB_ROBOT_HALF_WIDTH_X,
+            ),
+            (
+                task_d_constants.PRE_CLIMB_ROBOT_Y - task_d_constants.PRE_CLIMB_ROBOT_HALF_WIDTH_Y,
+                task_d_constants.PRE_CLIMB_ROBOT_Y + task_d_constants.PRE_CLIMB_ROBOT_HALF_WIDTH_Y,
+            ),
+            robot_default_z,
+        )
+        robot_yaw = task_d_constants.PRE_CLIMB_YAW_RANGE
+        box_pos = (
+            (
+                task_d_constants.CLIMB_BOX_TARGET_X - task_d_constants.CLIMB_BOX_HALF_WIDTH_X,
+                task_d_constants.CLIMB_BOX_TARGET_X + task_d_constants.CLIMB_BOX_HALF_WIDTH_X,
+            ),
+            (
+                task_d_constants.CLIMB_BOX_TARGET_Y - task_d_constants.CLIMB_BOX_HALF_WIDTH_Y,
+                task_d_constants.CLIMB_BOX_TARGET_Y + task_d_constants.CLIMB_BOX_HALF_WIDTH_Y,
+            ),
+            box_default_z,
+        )
+        box_yaw = task_d_constants.CLIMB_BOX_YAW
     elif stage == "drop":
-        robot_pos = ((3.05, 3.25), (1.50, 1.70), 1.55)
-        robot_yaw = (-0.08, 0.08)
-        box_pos = ((1.97, 2.03), (1.57, 1.63), box_default_z)
-        box_yaw = 0.0
+        robot_pos = (task_d_constants.DROP_ROBOT_X_RANGE, task_d_constants.DROP_ROBOT_Y_RANGE, task_d_constants.DROP_ROBOT_Z)
+        robot_yaw = task_d_constants.DROP_ROBOT_YAW_RANGE
+        box_pos = (
+            (
+                task_d_constants.CLIMB_BOX_TARGET_X - task_d_constants.CLIMB_BOX_HALF_WIDTH_X,
+                task_d_constants.CLIMB_BOX_TARGET_X + task_d_constants.CLIMB_BOX_HALF_WIDTH_X,
+            ),
+            (
+                task_d_constants.CLIMB_BOX_TARGET_Y - task_d_constants.CLIMB_BOX_HALF_WIDTH_Y,
+                task_d_constants.CLIMB_BOX_TARGET_Y + task_d_constants.CLIMB_BOX_HALF_WIDTH_Y,
+            ),
+            box_default_z,
+        )
+        box_yaw = task_d_constants.CLIMB_BOX_YAW
     elif stage == "push":
         # Match the competition start neighborhood: robot near original (-3, 0), box near (-3, 1.6).
         robot_pos = ((-0.15, 0.15), (-0.20, 0.20), robot_default_z)
@@ -136,9 +197,9 @@ def reset_task_d_stage(
         box_pos = ((-0.05, 0.05), (1.50, 1.70), box_default_z)
         box_yaw = (-0.04, 0.04)
     elif stage == "full":
-        robot_pos = (0.0, 0.0, robot_default_z)
+        robot_pos = (*task_d_constants.FULL_ROBOT_START, robot_default_z)
         robot_yaw = 0.0
-        box_pos = (0.0, 1.6, box_default_z)
+        box_pos = (*task_d_constants.FULL_BOX_START, box_default_z)
         box_yaw = 0.0
     else:
         raise ValueError(f"Unknown Task-D reset stage: {stage}")
@@ -158,8 +219,4 @@ def reset_task_d_stage(
             debug_num_envs,
         )
 
-    robot.write_joint_state_to_sim(
-        robot.data.default_joint_pos[env_ids],
-        torch.zeros_like(robot.data.default_joint_vel[env_ids]),
-        env_ids=env_ids,
-    )
+    _write_b2_standing_joint_state(robot, env_ids, debug=debug, debug_num_envs=debug_num_envs)

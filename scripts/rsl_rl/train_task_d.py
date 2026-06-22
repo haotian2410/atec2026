@@ -8,14 +8,18 @@ import sys  # 用来修改命令行参数，把默认 task 和预训练路径补
 from pathlib import Path  # 用 Path 检查默认预训练模型是否存在、定位 train.py。
 
 DEFAULT_TASK = "ATEC-TaskD-RL-B2-Climb-v0"  # 默认先训练 Climb 课程；完整串联可手动传 --task ATEC-TaskD-RL-B2-Full-v0。
-DEFAULT_PRETRAINED_CHECKPOINT = "atec_robot_model/baseline/unitree_b2_flat/policy.pt"  # 默认 walking baseline，用作弱预训练初始化。
+DEFAULT_PRETRAINED_CHECKPOINT = "atec_robot_model/baseline/unitree_b2_flat/policy.pt"  # 可选 walking baseline，用作弱预训练初始化。
+USE_DEFAULT_PRETRAINED_FLAG = "--use_default_pretrained"  # 仅显式传入该开关时才自动加载默认 walking baseline。
 
 
 def main():  # 脚本主函数。
     if "--task" not in sys.argv:  # 如果用户没有手动指定 --task。
         sys.argv.extend(["--task", DEFAULT_TASK])  # 自动补上任务 D RL 训练 task。
-    if "--pretrained_checkpoint" not in sys.argv and Path(DEFAULT_PRETRAINED_CHECKPOINT).exists():  # 如果用户没有指定预训练，且默认 baseline 文件存在。
-        sys.argv.extend(["--pretrained_checkpoint", DEFAULT_PRETRAINED_CHECKPOINT])  # 自动使用比赛目录里的 B2 flat walking policy 做部分初始化。
+    use_default_pretrained = USE_DEFAULT_PRETRAINED_FLAG in sys.argv  # 默认不加载旧 walking policy，避免初始动作破坏 Task D 姿态。
+    if use_default_pretrained:
+        sys.argv.remove(USE_DEFAULT_PRETRAINED_FLAG)
+    if use_default_pretrained and "--pretrained_checkpoint" not in sys.argv and Path(DEFAULT_PRETRAINED_CHECKPOINT).exists():
+        sys.argv.extend(["--pretrained_checkpoint", DEFAULT_PRETRAINED_CHECKPOINT])
 
     train_py = Path(__file__).with_name("train.py")  # 找到同目录下通用 RSL-RL 训练脚本 scripts/rsl_rl/train.py。
     sys.path.insert(0, str(train_py.parent))  # 将 scripts/rsl_rl 加入 import 搜索路径，保证 train.py 里的 cli_args 可导入。

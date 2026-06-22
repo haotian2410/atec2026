@@ -8,6 +8,8 @@ import torch
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers.manager_base import ManagerTermBase
 
+from atec_rl_lab.tasks.task_d import constants as task_d_constants
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
@@ -29,7 +31,7 @@ def robot_x_greater_than(
 def box_near_target_xy(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("box"),
-    target_xy: tuple[float, float] = (2.0, 1.6),
+    target_xy: tuple[float, float] = (task_d_constants.CLIMB_BOX_TARGET_X, task_d_constants.CLIMB_BOX_TARGET_Y),
     radius: float = 0.25,
 ) -> torch.Tensor:
     """Terminate when box xy is close enough to the fixed push target."""
@@ -52,13 +54,14 @@ def push_ready_for_climb(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     box_cfg: SceneEntityCfg = SceneEntityCfg("box"),
-    box_target_xy: tuple[float, float] = (2.0, 1.6),
-    box_radius: float = 0.10,
-    box_max_abs_yaw: float = 0.15,
-    robot_target_xy: tuple[float, float] = (1.20, 1.60),
-    robot_x_half_width: float = 0.25,
-    robot_y_half_width: float = 0.25,
-    robot_max_abs_yaw: float = 0.25,
+    box_target_xy: tuple[float, float] = (task_d_constants.CLIMB_BOX_TARGET_X, task_d_constants.CLIMB_BOX_TARGET_Y),
+    box_x_half_width: float = task_d_constants.CLIMB_BOX_HALF_WIDTH_X,
+    box_y_half_width: float = task_d_constants.CLIMB_BOX_HALF_WIDTH_Y,
+    box_max_abs_yaw: float = task_d_constants.CLIMB_BOX_YAW_TOL,
+    robot_target_xy: tuple[float, float] = (task_d_constants.PRE_CLIMB_ROBOT_X, task_d_constants.PRE_CLIMB_ROBOT_Y),
+    robot_x_half_width: float = task_d_constants.PRE_CLIMB_ROBOT_HALF_WIDTH_X,
+    robot_y_half_width: float = task_d_constants.PRE_CLIMB_ROBOT_HALF_WIDTH_Y,
+    robot_max_abs_yaw: float = task_d_constants.PRE_CLIMB_YAW_RANGE[1],
     max_projected_gravity_xy: float = 0.6,
     robot_max_lin_speed: float = 0.7,
     robot_max_ang_speed: float = 1.2,
@@ -70,8 +73,8 @@ def push_ready_for_climb(
     box = env.scene[box_cfg.name]
 
     box_target = torch.tensor(box_target_xy, device=box.data.root_pos_w.device, dtype=box.data.root_pos_w.dtype)
-    box_dist = torch.linalg.norm(_local_root_pos(env, box)[:, :2] - box_target.unsqueeze(0), dim=1)
-    box_near = box_dist < float(box_radius)
+    box_delta = torch.abs(_local_root_pos(env, box)[:, :2] - box_target.unsqueeze(0))
+    box_near = (box_delta[:, 0] < float(box_x_half_width)) & (box_delta[:, 1] < float(box_y_half_width))
     box_yaw_ok = _abs_wrapped_angle(_yaw_from_quat_wxyz(box.data.root_quat_w) - 0.0) < float(box_max_abs_yaw)
 
     robot_target = torch.tensor(robot_target_xy, device=robot.data.root_pos_w.device, dtype=robot.data.root_pos_w.dtype)
@@ -95,19 +98,25 @@ class JointPositionHardLimit(ManagerTermBase):
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         self._violation_count = torch.zeros(self._env.num_envs, dtype=torch.long, device=self._env.device)
+        self._steps_since_reset = torch.zeros(self._env.num_envs, dtype=torch.long, device=self._env.device)
 
     def reset(self, env_ids=None):
         if env_ids is None:
             self._violation_count.zero_()
+            self._steps_since_reset.zero_()
         else:
             self._violation_count[env_ids] = 0
+            self._steps_since_reset[env_ids] = 0
 
     def __call__(
         self,
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-        hard_margin: float = 0.10,
-        consecutive_frames: int = 3,
+        hard_margin: float = 0.20,
+        consecutive_frames: int = 8,
+        grace_steps: int = 10,
+        debug: bool = False,
+        debug_num_envs: int = 4,
     ) -> torch.Tensor:
         robot = env.scene[asset_cfg.name]
         joint_ids = asset_cfg.joint_ids if asset_cfg.joint_ids is not None else slice(None)
@@ -115,7 +124,31 @@ class JointPositionHardLimit(ManagerTermBase):
         limits = robot.data.soft_joint_pos_limits[:, joint_ids]
         lower = limits[..., 0] - float(hard_margin)
         upper = limits[..., 1] + float(hard_margin)
-        violating = torch.any((joint_pos < lower) | (joint_pos > upper), dim=1)
+        raw_violations = (joint_pos < lower) | (joint_pos > upper)
+        violating = torch.any(raw_violations, dim=1)
+
+        self._steps_since_reset += 1
+        in_grace = self._steps_since_reset <= max(int(grace_steps), 0)
+        violating &= ~in_grace
+
+        if debug and torch.any(violating):
+            env_ids = torch.nonzero(violating, as_tuple=False).flatten()[: int(debug_num_envs)]
+            joint_names = getattr(asset_cfg, "joint_names", None)
+            for env_id_t in env_ids:
+                env_id = int(env_id_t.item())
+                bad_joint_ids = torch.nonzero(raw_violations[env_id], as_tuple=False).flatten()
+                for local_joint_id_t in bad_joint_ids[:4]:
+                    local_joint_id = int(local_joint_id_t.item())
+                    joint_name = joint_names[local_joint_id] if joint_names is not None and local_joint_id < len(joint_names) else str(local_joint_id)
+                    pos = float(joint_pos[env_id, local_joint_id].item())
+                    lo = float(lower[env_id, local_joint_id].item())
+                    hi = float(upper[env_id, local_joint_id].item())
+                    print(
+                        "[TaskD joint limit] "
+                        f"env_id={env_id} joint={joint_name} pos={pos:.4f} "
+                        f"allowed=[{lo:.4f}, {hi:.4f}] steps_since_reset={int(self._steps_since_reset[env_id].item())}"
+                    )
+
         self._violation_count = torch.where(
             violating,
             self._violation_count + 1,

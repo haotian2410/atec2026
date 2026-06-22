@@ -18,7 +18,7 @@
 cd /home/lht/code/ATEC2026
 ```
 
-`scripts/rsl_rl/train_task_d.py` 的默认行为保持不变：如果不传 `--task`，默认训练 `ATEC-TaskD-RL-B2-Climb-v0`；如果存在 `atec_robot_model/baseline/unitree_b2_flat/policy.pt`，会自动作为弱预训练初始化。
+`scripts/rsl_rl/train_task_d.py` 如果不传 `--task`，默认训练 `ATEC-TaskD-RL-B2-Climb-v0`。默认不再自动加载 `atec_robot_model/baseline/unitree_b2_flat/policy.pt`，因为 Task D 的 lidar 观测维度不同，部分加载旧 walking policy 会导致初始动作过大、Climb 大量摔倒；需要对照实验时可显式加 `--use_default_pretrained`。
 
 所有阶段的 checkpoint 默认写到：
 
@@ -34,7 +34,7 @@ Task D RL 地形会在 `--num_envs` 覆盖之后自动同步：`scene.env_spacin
 
 当前 RL 环境使用 plain Unitree B2，不使用 Piper 机械臂；动作空间是 12 个腿部关节。Task D RL task id 统一使用 `ATEC-TaskD-RL-B2-*`，不要再使用旧的 `B2Piper` RL 名称。
 
-阶段之间按状态分布衔接：Push 的成功终止不再只是箱子到目标点，而是要求箱子姿态接近 Climb reset 的箱子姿态，机器人也要站到 Climb 的预爬入口附近并基本朝向正确；Climb 的平台侧奖励要求机器人在平台侧保持较稳定、低速状态，以便接上 Drop reset。
+阶段之间按状态分布衔接：Push 的成功终止不再只是箱子到目标点，而是要求箱子姿态接近 Climb reset 的箱子姿态，机器人也要站到 Climb 的预爬入口附近并基本朝向正确；Climb 的平台侧奖励要求机器人在平台侧保持较稳定、低速状态，以便接上 Drop reset。当前固定地图接口坐标均为 env-origin local 坐标：Full robot start `(0.0, 0.0)`，Full box start `(0.0, 1.6)`，Push/Climb box target `(2.9, 1.6)`，Push/Climb pre-climb robot target `(1.9, 1.6)`，Drop robot reset `x=(3.05, 3.25), y=(1.50, 1.70)`。
 
 ## 长训练前 sanity check
 
@@ -98,7 +98,7 @@ python scripts/rsl_rl/train_task_d.py \
 
 ## Stage 1: Push
 
-从 walking baseline 开始训练推箱子阶段。当前 Push 成功终止要求同时满足：箱子接近 Climb 的箱子目标 `(2.0, 1.6)`，箱子 yaw 基本对齐，机器人接近 Climb 预爬入口 `(1.20, 1.60)`，机器人 yaw 基本对齐，并且机器人/箱子速度较低。
+从 walking baseline 开始训练推箱子阶段。当前 Push 成功终止要求同时满足：箱子接近 Climb 的箱子目标 `(2.9, 1.6)`，箱子 yaw 基本对齐，机器人接近 Climb 预爬入口 `(1.9, 1.6)`，机器人 yaw 基本对齐，并且机器人/箱子速度较低。
 
 
 ```bash
