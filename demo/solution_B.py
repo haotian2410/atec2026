@@ -11,24 +11,14 @@
    锁定一个 ee 远目标后进入粗接近，不继续看边界/投放区矮墙；
 5. APPROACH_TRASH_TARGET：持续保存最新 live 帧并刷新 YOLO。ee 远目标保持锁定粗靠近，
    一旦 head/body 最新帧看到近目标，切到本体相机微调；
-6. PRONE_TRANSITION：本体相机近距离微调稳定后，不再继续挪底盘，而是在动作层
-   把 12 个腿关节从当前 RL 站姿动作线性插值到固定趴下姿态，降低机身和末端高度；
-7. READY_TO_GRASP：趴下插值完成后保持固定趴姿，底盘静止，等待后续机械臂抓取逻辑接入。
-
-趴下逻辑说明：
-- 状态层只负责决定何时进入 PRONE_TRANSITION，并把底盘速度命令置零；
-- 动作层仍先运行原来的 locomotion policy，得到当前帧的站立腿部动作；
-- _apply_prone_override() 再按 alpha 将腿部动作平滑混到 fixed_prone_leg_action；
-- alpha 在 PRONE_TRANSITION 中从 0 到 1，进入 READY_TO_GRASP 后固定为 1；
-- 机械臂 8 维动作目前仍保持 0，不在这里做抓取。
+6. READY_TO_GRASP：本体相机目标满足中下部视角和距离条件后，底盘静止等待抓取逻辑。
 
 关键函数位置：
 - _compute_navigation_command(): 主状态机和每个阶段的速度决策；
 - _refresh_yolo_targets(): 轮询 yolo_results.json，避免接近阶段用通用选择器破坏远端锁；
 - _select_far_search_target() / _lock_or_choose_far_target(): ee 远搜目标选择和稳定锁定；
 - _select_approach_target() / _choose_latest_body_target(): 接近阶段相机切换和最新 head/body 帧优先；
-- _write_pose_state(): 给 pose_viewer 和调试用的状态快照；
-- _prone_override_alpha() / _apply_prone_override(): 预抓取阶段的固定趴姿插值覆盖。
+- _write_pose_state(): 给 pose_viewer 和调试用的状态快照。
 
 solution.py 只负责调度和控制闭环；地图先验、投放区拟合、YOLO 数据契约、
 Piper 运动学等细节放在 demo/tool 目录，避免主状态机继续膨胀。
@@ -63,28 +53,15 @@ except ImportError:
 
 class AlgSolution:
 
-    # 官方默认 leg/arm position action 都是：target = default_joint_pos + scale * action。
-    # 这里保持默认 scale=0.5，因此固定姿态动作需要用
-    # (目标绝对关节角 - 默认绝对关节角) / 0.5 反推出来。
     ACTION_SCALE = 0.5
-
-    # Task 环境步长是 0.02s；趴下插值按 step_count 计时，避免依赖 wall clock。
     CONTROL_DT = 0.02
     PRONE_TRANSITION_SECONDS = 1.0
-
-    # B2Piper 腿部 12 维关节顺序固定为：
-    # FR_hip, FR_thigh, FR_calf, FL_hip, FL_thigh, FL_calf,
-    # RR_hip, RR_thigh, RR_calf, RL_hip, RL_thigh, RL_calf。
-    # 这些默认角来自 assets/robots/b2.py 里的 UNITREE_B2_PIPER_CFG.init_state。
     DEFAULT_LEG_POS = (
         -0.1, 0.8, -1.5,
         0.1, 0.8, -1.5,
         -0.1, 1.0, -1.5,
         0.1, 1.0, -1.5,
     )
-    # 固定趴下姿态的绝对关节目标，单位是弧度。
-    # 这组值来自前面单独测试过的固定趴姿：四条腿折叠后能降低机身，
-    # 同时比“前腿跪姿”更不容易让头部先撞地。
     PRONE_LEG_TARGET = (
         -0.1, 1.55, -2.55,
         0.1, 1.55, -2.55,
@@ -104,10 +81,6 @@ class AlgSolution:
 
         self.policy = torch.jit.load(policy_path, map_location=self.device)
         self.policy.eval()
-
-        # 保留这两个可选策略的加载，方便以后对比；当前预抓取趴下不使用它们。
-        # 原因是这次要的是确定、可复现的固定趴姿：先由 locomotion policy 给出
-        # 当前站立动作，再用 _apply_prone_override() 平滑覆盖腿部 12 维。
         self.prone_policy = self._load_optional_leg_policy("prone_policy.pt")
         self.low_stance_policy = self._load_optional_leg_policy("low_stance_policy.pt")
         self.active_leg_policy_name = "locomotion"
@@ -153,8 +126,6 @@ class AlgSolution:
             device=self.device,
             dtype=torch.float32,
         )
-        # 预先把“绝对趴姿关节角”换算成环境需要的 action。
-        # predicts() 每帧只需要 repeat 和线性插值，不再重复做张量构造。
         default_leg_pos = torch.tensor(
             self.DEFAULT_LEG_POS,
             device=self.device,
@@ -220,8 +191,6 @@ class AlgSolution:
         self.last_yolo_diag = {"available": False, "reason": "not_checked"}
         self.ready_to_grasp_steps = 0
         self.ready_to_grasp_last_image = None
-        # PRONE_TRANSITION 的起始 step。为 None 表示当前还没开始趴下插值；
-        # 一旦本体相机近距离微调确认 ready_to_grasp，会记录当前 step_count。
         self.prone_transition_start_step = None
         self.locked_trash_target = None
         self.locked_trash_miss_steps = 0
@@ -699,9 +668,6 @@ class AlgSolution:
                     self.ready_to_grasp_steps += 1
                     self.ready_to_grasp_last_image = image_key
                 if servo.get("ready_to_grasp") and self.ready_to_grasp_steps >= 3:
-                    # 本体相机连续多帧确认目标已经位于可抓取区域：
-                    # 先进入趴下过渡，让机身/相机/末端整体降低，再交给机械臂抓取。
-                    # 这里不直接切 READY_TO_GRASP，是为了避免腿部动作瞬间跳到低姿态。
                     self.phase = "PRONE_TRANSITION"
                     self.prone_transition_start_step = self.step_count
                 return self._velocity_tensor(0.0, 0.0, 0.0)
@@ -715,9 +681,7 @@ class AlgSolution:
             )
 
         if self.phase == "PRONE_TRANSITION":
-            # 本体相机近距离微调完成后，底盘停住。
-            # 这里只更新状态和速度命令；真正的腿部插值在 _apply_prone_override() 完成，
-            # 这样 locomotion policy、动作尺度映射和固定趴姿覆盖仍集中在动作层。
+            # 本体相机近距离微调完成后，底盘停住，动作层负责线性插值趴下。
             if self.prone_transition_start_step is None:
                 self.prone_transition_start_step = self.step_count
             if self.step_count - self.prone_transition_start_step >= self.prone_transition_total_steps:
@@ -1568,12 +1532,7 @@ class AlgSolution:
         return policy_obs
 
     def _map_policy_action_to_env_action(self, action_train: torch.Tensor, action_dim: int) -> torch.Tensor:
-        """把腿部 policy 输出映射到当前环境的全身 action。
-
-        policy.pt 输出的是训练时的 12 维腿部动作；环境实际需要 B2Piper 的 20 维动作：
-        前 12 维是腿，后 8 维是 Piper 机械臂/夹爪。腿部还要乘以
-        train_to_env_action_scale，补偿训练环境和比赛环境的 action scale 差异。
-        """
+        """Map training-time 12D leg action to current env 20D full-body action."""
         if action_train.shape[-1] != self.leg_action_dim:
             raise ValueError(
                 f"Policy output dim mismatch: got {action_train.shape[-1]}, expected {self.leg_action_dim}"
@@ -1594,12 +1553,6 @@ class AlgSolution:
         return action_env
 
     def _prone_override_alpha(self) -> float | None:
-        """返回固定趴姿覆盖权重。
-
-        None 表示当前不是预抓取趴下相关阶段，不改腿部动作；
-        0 到 1 表示正在 PRONE_TRANSITION 中线性插值；
-        1 表示已经进入 READY_TO_GRASP，需要持续保持固定趴姿。
-        """
         if self.phase == "READY_TO_GRASP":
             return 1.0
         if self.phase != "PRONE_TRANSITION":
@@ -1610,12 +1563,6 @@ class AlgSolution:
         return float(np.clip(elapsed_steps / self.prone_transition_total_steps, 0.0, 1.0))
 
     def _apply_prone_override(self, action_env: torch.Tensor) -> torch.Tensor:
-        """在预抓取阶段覆盖腿部 12 维动作，机械臂动作不变。
-
-        这里使用“RL 当前输出 -> 固定趴姿”的动作空间插值，而不是直接插值关节角。
-        因为 position action 本身就是相对默认关节角的目标偏移，插值 action 等价于
-        插值目标关节角，并且能保持与 get_action_spec() 的 scale 定义一致。
-        """
         alpha = self._prone_override_alpha()
         if alpha is None:
             return action_env
@@ -1626,8 +1573,6 @@ class AlgSolution:
         return action_env
 
     def _select_leg_policy(self):
-        # 趴下阶段仍运行 locomotion policy 作为插值起点；最终腿部动作会在
-        # _apply_prone_override() 中被固定趴姿覆盖。active_leg_policy_name 只用于调试状态。
         if self.phase in ("PRONE_TRANSITION", "READY_TO_GRASP"):
             self.active_leg_policy_name = "fixed_prone"
             return self.policy
@@ -1637,13 +1582,12 @@ class AlgSolution:
     def predicts(self, obs, current_score):
         """每个控制步的总入口：更新策略状态、跑腿部 policy、返回完整动作。
 
-        当前动作结构是“腿部 RL + 预抓取固定趴姿覆盖 + 机械臂默认保持”：
-        1. _compute_navigation_command() 根据状态机产生期望底盘速度；
-        2. _extract_policy_obs() 把速度命令塞进腿部 policy 观测；
-        3. policy 输出 12 维腿部动作，作为正常行走/站立控制；
-        4. _map_policy_action_to_env_action() 映射成环境 20 维全身 action；
-        5. 如果处于 PRONE_TRANSITION / READY_TO_GRASP，_apply_prone_override()
-           会把前 12 维腿部动作平滑覆盖为固定趴姿，后 8 维机械臂仍保持默认。
+        当前动作结构仍然是“腿部 RL + 机械臂默认保持”：
+        1. _compute_navigation_command() 根据状态机产生期望底盘速度。
+        2. _extract_policy_obs() 把该速度命令塞进腿部 policy 观测。
+        3. policy 输出 12 维腿部动作。
+        4. _map_policy_action_to_env_action() 映射成环境需要的全身 action，
+           其中腿部 12 维来自 policy，机械臂 8 维当前填 self.arm_default_action。
 
         后续接机械臂抓取时，推荐从两个位置切入：
         - 状态层：在 self.phase == "READY_TO_GRASP" 后增加抓取/夹爪/投放子状态。
