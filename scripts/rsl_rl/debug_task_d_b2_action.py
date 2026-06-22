@@ -19,6 +19,8 @@ parser.add_argument("--disable_fabric", action="store_true", default=False)
 parser.add_argument("--debug_reset_positions", action="store_true", default=True)
 parser.add_argument("--debug_reset_num_envs", type=int, default=4)
 parser.add_argument("--full_output", action="store_true", default=False, help="Print full root/action diagnostics before and after every step.")
+parser.add_argument("--random_std", type=float, default=0.05, help="Std for random_action mode; use 0.3 to match initial PPO noise.")
+parser.add_argument("--print_every", type=int, default=1, help="Print one step summary every N steps.")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -257,12 +259,14 @@ def main():
             if args_cli.mode == "zero_action":
                 action = torch.zeros((env.unwrapped.num_envs, action_dim), device=env.unwrapped.device)
             elif args_cli.mode == "random_action":
-                action = 0.05 * torch.randn((env.unwrapped.num_envs, action_dim), device=env.unwrapped.device)
+                action = float(args_cli.random_std) * torch.randn((env.unwrapped.num_envs, action_dim), device=env.unwrapped.device)
             else:
                 with torch.inference_mode():
                     action = policy(obs)
-            print(f"[TaskD B2 debug] step={step}", flush=True)
-            if args_cli.full_output:
+            should_print = step == 0 or step == args_cli.steps - 1 or (step % max(int(args_cli.print_every), 1) == 0)
+            if should_print:
+                print(f"[TaskD B2 debug] step={step}", flush=True)
+            if args_cli.full_output and should_print:
                 _print_step_summary(env, f"before_step_{step}", action=action)
             step_result = step_env.step(action)
             if len(step_result) == 5:
@@ -270,8 +274,9 @@ def main():
             else:
                 obs, reward, terminated, _ = step_result
                 truncated = torch.zeros_like(terminated, dtype=torch.bool)
-            _print_step_summary(env, f"after_step_{step}", action=action, reward=reward, terminated=terminated, truncated=truncated)
-            if args_cli.full_output:
+            if should_print or bool(torch.any(terminated).item()) or bool(torch.any(truncated).item()):
+                _print_step_summary(env, f"after_step_{step}", action=action, reward=reward, terminated=terminated, truncated=truncated)
+            if args_cli.full_output and should_print:
                 _print_terminations(env, terminated, truncated)
     finally:
         if wrapped_env is not None:

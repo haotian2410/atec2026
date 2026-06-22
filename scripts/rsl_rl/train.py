@@ -332,7 +332,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
 
     # run training
-    runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+    init_at_random_ep_len = not hasattr(env_cfg, "task_d_stage")
+    runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=init_at_random_ep_len)
 
     print(f"Training time: {round(time.time() - start_time, 2)} seconds")
 
