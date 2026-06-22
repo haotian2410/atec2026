@@ -130,10 +130,11 @@ def reset_task_d_stage(
         box_pos = ((1.97, 2.03), (1.57, 1.63), box_default_z)
         box_yaw = 0.0
     elif stage == "push":
-        robot_pos = ((-0.95, -0.65), (1.50, 1.70), robot_default_z)
-        robot_yaw = (-0.08, 0.08)
-        box_pos = (0.0, 1.6, box_default_z)
-        box_yaw = 0.0
+        # Match the competition start neighborhood: robot near original (-3, 0), box near (-3, 1.6).
+        robot_pos = ((-0.15, 0.15), (-0.20, 0.20), robot_default_z)
+        robot_yaw = (-0.12, 0.12)
+        box_pos = ((-0.05, 0.05), (1.50, 1.70), box_default_z)
+        box_yaw = (-0.04, 0.04)
     elif stage == "full":
         robot_pos = (0.0, 0.0, robot_default_z)
         robot_yaw = 0.0
