@@ -77,6 +77,15 @@ import atec_rl_lab.train  # noqa: F401  # isort: skip
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 
+def _sync_task_d_terrain_if_needed(env_cfg) -> bool:
+    if not hasattr(env_cfg, "task_d_stage"):
+        return False
+    from atec_rl_lab.tasks.task_d.rl_env_cfg import sync_task_d_terrain_grid
+
+    sync_task_d_terrain_grid(env_cfg)
+    return True
+
+
 # PLACEHOLDER: Extension template (do not remove this comment)
 
 
@@ -89,6 +98,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # override configurations with non-hydra CLI arguments
     agent_cfg: RslRlBaseRunnerCfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else 64
+    is_task_d_rl = _sync_task_d_terrain_if_needed(env_cfg)
 
     # set the environment seed
     # note: certain randomizations occur in the environment initialization so we set the seed here
@@ -98,7 +108,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # spawn the robot randomly in the grid (instead of their terrain levels)
     env_cfg.scene.terrain.max_init_terrain_level = None
     # reduce the number of terrains to save memory
-    if env_cfg.scene.terrain.terrain_generator is not None:
+    if env_cfg.scene.terrain.terrain_generator is not None and not is_task_d_rl:
         env_cfg.scene.terrain.terrain_generator.num_rows = 5
         env_cfg.scene.terrain.terrain_generator.num_cols = 5
         env_cfg.scene.terrain.terrain_generator.curriculum = False

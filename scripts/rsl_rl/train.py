@@ -104,6 +104,15 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 import atec_rl_lab.train  # noqa: F401  # isort: skip
 import atec_rl_lab.tasks  # noqa: F401  # isort: skip
 
+
+def _sync_task_d_terrain_if_needed(env_cfg):
+    if not hasattr(env_cfg, "task_d_stage"):
+        return
+    from atec_rl_lab.tasks.task_d.rl_env_cfg import sync_task_d_terrain_grid
+
+    sync_task_d_terrain_grid(env_cfg)
+
+
 # import logger
 logger = logging.getLogger(__name__)
 
@@ -222,6 +231,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # override configurations with non-hydra CLI arguments
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+    _sync_task_d_terrain_if_needed(env_cfg)
     agent_cfg.max_iterations = (
         args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg.max_iterations
     )

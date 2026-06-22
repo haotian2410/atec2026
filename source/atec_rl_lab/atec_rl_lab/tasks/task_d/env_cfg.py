@@ -24,7 +24,7 @@ class RewardsCfg:
     achieve = RewTerm(
         func=atec_mdp.RewardCrossX,
         params={"asset_cfg": SceneEntityCfg("robot"),
-                "threshold": [-1.4, 2.0],
+                "threshold": [1.6, 5.0],
                 "reward_value": [2, 20.0],
                 "debug": False,
                 "visual_assets": True,
@@ -35,8 +35,8 @@ class RewardsCfg:
         func=atec_mdp.RewardBoxXInRange,
         params={
             "asset_cfg": SceneEntityCfg("box"),
-            "x_min": [-0.7, -1.4],
-            "x_max": [0.7, -0.7],
+            "x_min": [2.3, 1.6],
+            "x_max": [3.7, 2.3],
             "reward_value": 14.0,
             "one_time": True,
             "debug": False,
@@ -50,7 +50,7 @@ class TaskDTerminationsCfg(BaseTerminationsCfg):
         func=atec_mdp.robot_x_greater_than,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "x_threshold": 3.5,
+            "x_threshold": 6.5,
         },
         time_out=False,
     )
