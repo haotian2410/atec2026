@@ -63,7 +63,7 @@ gym.register(
 
 
 gym.register(
-    id="ATEC-TaskD-RL-B2Piper-Climb-v0",
+    id="ATEC-TaskD-RL-B2-Climb-v0",
     entry_point="atec_rl_lab.tasks.task_base.envs_base:BaseRLEnv",
     disable_env_checker=True,
     kwargs={
@@ -73,7 +73,7 @@ gym.register(
 )
 
 gym.register(
-    id="ATEC-TaskD-RL-B2Piper-Drop-v0",
+    id="ATEC-TaskD-RL-B2-Drop-v0",
     entry_point="atec_rl_lab.tasks.task_base.envs_base:BaseRLEnv",
     disable_env_checker=True,
     kwargs={
@@ -83,7 +83,7 @@ gym.register(
 )
 
 gym.register(
-    id="ATEC-TaskD-RL-B2Piper-Push-v0",
+    id="ATEC-TaskD-RL-B2-Push-v0",
     entry_point="atec_rl_lab.tasks.task_base.envs_base:BaseRLEnv",
     disable_env_checker=True,
     kwargs={
@@ -93,7 +93,7 @@ gym.register(
 )
 
 gym.register(
-    id="ATEC-TaskD-RL-B2Piper-Mixed-v0",
+    id="ATEC-TaskD-RL-B2-Mixed-v0",
     entry_point="atec_rl_lab.tasks.task_base.envs_base:BaseRLEnv",
     disable_env_checker=True,
     kwargs={
@@ -103,7 +103,7 @@ gym.register(
 )
 
 gym.register(
-    id="ATEC-TaskD-RL-B2Piper-Full-v0",
+    id="ATEC-TaskD-RL-B2-Full-v0",
     entry_point="atec_rl_lab.tasks.task_base.envs_base:BaseRLEnv",
     disable_env_checker=True,
     kwargs={
@@ -113,7 +113,7 @@ gym.register(
 )
 
 gym.register(
-    id="ATEC-TaskD-RL-B2Piper-v0",
+    id="ATEC-TaskD-RL-B2-v0",
     entry_point="atec_rl_lab.tasks.task_base.envs_base:BaseRLEnv",
     disable_env_checker=True,
     kwargs={

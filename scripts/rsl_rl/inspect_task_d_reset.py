@@ -9,7 +9,7 @@ import sys
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="Inspect Task-D reset local/world poses.")
-parser.add_argument("--task", type=str, default="ATEC-TaskD-RL-B2Piper-Climb-v0")
+parser.add_argument("--task", type=str, default="ATEC-TaskD-RL-B2-Climb-v0")
 parser.add_argument("--num_envs", type=int, default=4)
 parser.add_argument("--steps", type=int, default=1, help="Number of zero-action steps after reset.")
 parser.add_argument("--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations.")
@@ -90,8 +90,8 @@ def _print_pose_table(env, terrain_x: float, terrain_y: float, terrain_origin_x:
 
 
 def main():
-    if not args_cli.task.startswith("ATEC-TaskD-RL-B2Piper"):
-        raise ValueError("This inspector is Task-D RL B2Piper only.")
+    if not args_cli.task.startswith("ATEC-TaskD-RL-B2"):
+        raise ValueError("This inspector is Task-D RL B2 only.")
 
     print(f"[TaskD inspect] parsing env cfg: task={args_cli.task} num_envs={args_cli.num_envs}", flush=True)
     env_cfg = parse_env_cfg(

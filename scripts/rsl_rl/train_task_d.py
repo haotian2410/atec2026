@@ -1,5 +1,5 @@
 #!/usr/bin/env python3  # 允许直接执行该脚本，例如 ./scripts/rsl_rl/train_task_d.py。
-"""Train the Task-D B2Piper box-as-step policy with RSL-RL."""  # 脚本用途：训练任务 D B2Piper 垫高上平台策略。
+"""Train the Task-D B2 box-as-step policy with RSL-RL."""  # 脚本用途：训练任务 D B2 垫高上平台策略。
 
 from __future__ import annotations  # 启用延迟类型注解，保持 Python 版本兼容。
 
@@ -7,7 +7,7 @@ import runpy  # 用来在当前进程中运行通用 scripts/rsl_rl/train.py。
 import sys  # 用来修改命令行参数，把默认 task 和预训练路径补进去。
 from pathlib import Path  # 用 Path 检查默认预训练模型是否存在、定位 train.py。
 
-DEFAULT_TASK = "ATEC-TaskD-RL-B2Piper-Climb-v0"  # 默认先训练 Climb 课程；完整串联可手动传 --task ATEC-TaskD-RL-B2Piper-Full-v0。
+DEFAULT_TASK = "ATEC-TaskD-RL-B2-Climb-v0"  # 默认先训练 Climb 课程；完整串联可手动传 --task ATEC-TaskD-RL-B2-Full-v0。
 DEFAULT_PRETRAINED_CHECKPOINT = "atec_robot_model/baseline/unitree_b2_flat/policy.pt"  # 默认 walking baseline，用作弱预训练初始化。
 
 
