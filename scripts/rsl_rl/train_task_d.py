@@ -7,7 +7,7 @@ import runpy  # 用来在当前进程中运行通用 scripts/rsl_rl/train.py。
 import sys  # 用来修改命令行参数，把默认 task 和预训练路径补进去。
 from pathlib import Path  # 用 Path 检查默认预训练模型是否存在、定位 train.py。
 
-DEFAULT_TASK = "ATEC-TaskD-RL-B2Piper-v0"  # 默认训练的 Gym task id，对应 task_d/rl_env_cfg.py。
+DEFAULT_TASK = "ATEC-TaskD-RL-B2Piper-Climb-v0"  # 默认先训练 Climb 课程；完整串联可手动传 --task ATEC-TaskD-RL-B2Piper-Full-v0。
 DEFAULT_PRETRAINED_CHECKPOINT = "atec_robot_model/baseline/unitree_b2_flat/policy.pt"  # 默认 walking baseline，用作弱预训练初始化。
 
 
