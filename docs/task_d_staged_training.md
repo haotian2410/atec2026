@@ -32,6 +32,10 @@ Task D RL 地形会在 `--num_envs` 覆盖之后自动同步：`scene.env_spacin
 
 当前建议先用 `--num_envs 512` 正式训练。`1024` 也可以试，但 Task D 地图和 lidar 输入比较重，512 更稳。
 
+当前 RL 环境使用 plain Unitree B2，不使用 Piper 机械臂；动作空间是 12 个腿部关节。Task D RL task id 统一使用 `ATEC-TaskD-RL-B2-*`，不要再使用旧的 `B2Piper` RL 名称。
+
+阶段之间按状态分布衔接：Push 的成功终止不再只是箱子到目标点，而是要求箱子姿态接近 Climb reset 的箱子姿态，机器人也要站到 Climb 的预爬入口附近并基本朝向正确；Climb 的平台侧奖励要求机器人在平台侧保持较稳定、低速状态，以便接上 Drop reset。
+
 ## 长训练前 sanity check
 
 每次开始一个阶段长训练前，先看 reset 是否正常，再跑 1 个 PPO iteration。
@@ -58,9 +62,44 @@ python scripts/rsl_rl/train_task_d.py \
 
 训练其他阶段前，把 task id 中的 `Push` 换成 `Climb`、`Drop`、`Mixed` 或 `Full`，并相应修改 `--run_name`。
 
+## Stage 0: B2 稳定性检查
+
+Stage 0 不单独增加新的 Task D curriculum task id。它用于确认 plain B2、12 维动作、预训练加载、reset 和视频录制都正常，再进入正式课程训练。
+
+先列出当前 Task D RL 环境名：
+
+```bash
+python scripts/list_envs.py | grep "ATEC-TaskD-RL"
+```
+
+再跑 Climb 和 Push 的 1 iteration sanity：
+
+```bash
+python scripts/rsl_rl/train_task_d.py \
+  --task ATEC-TaskD-RL-B2-Climb-v0 \
+  --run_name sanity_climb \
+  --num_envs 4 \
+  --max_iterations 1 \
+  --video \
+  --video_length 200
+```
+
+```bash
+python scripts/rsl_rl/train_task_d.py \
+  --task ATEC-TaskD-RL-B2-Push-v0 \
+  --run_name sanity_push \
+  --num_envs 4 \
+  --max_iterations 1 \
+  --video \
+  --video_length 200
+```
+
+如果视频里 B2 仍然出现剧烈抽动、明显翻滚或 reset 到地图外，先不要启动长训练。
+
 ## Stage 1: Push
 
-从 walking baseline 开始训练推箱子阶段：
+从 walking baseline 开始训练推箱子阶段。当前 Push 成功终止要求同时满足：箱子接近 Climb 的箱子目标 `(2.0, 1.6)`，箱子 yaw 基本对齐，机器人接近 Climb 预爬入口 `(1.20, 1.60)`，机器人 yaw 基本对齐，并且机器人/箱子速度较低。
+
 
 ```bash
 python scripts/rsl_rl/train_task_d.py \
@@ -87,7 +126,8 @@ python scripts/rsl_rl/train_task_d.py \
 
 ## Stage 2: Climb
 
-从最好的 Push checkpoint 开始训练爬箱子/上平台：
+从最好的 Push checkpoint 开始训练爬箱子/上平台。Climb reset 中箱子已经在 Push 成功目标附近，机器人从预爬入口附近开始；平台侧奖励要求机器人在平台侧保持直立且速度较低，方便后续接 Drop。
+
 
 ```bash
 python scripts/rsl_rl/train_task_d.py \
@@ -109,7 +149,8 @@ python scripts/rsl_rl/train_task_d.py --headless
 
 ## Stage 3: Drop
 
-从最好的 Climb checkpoint 开始训练下平台后稳定冲线：
+从最好的 Climb checkpoint 开始训练下平台后稳定冲线。Drop reset 从平台侧/平台上稳定姿态开始，目标是下平台后继续向终点走。
+
 
 ```bash
 python scripts/rsl_rl/train_task_d.py \
@@ -125,7 +166,8 @@ python scripts/rsl_rl/train_task_d.py \
 
 ## Stage 4: Mixed
 
-从最好的 Drop checkpoint 开始混合 reset 训练，用于衔接各阶段：
+从最好的 Drop checkpoint 开始混合 reset 训练，用于测试和强化 Push、Climb、Drop、Full 起点之间的衔接。Mixed 不是重新设计任务，只是按 reset 分布混合采样。
+
 
 ```bash
 python scripts/rsl_rl/train_task_d.py \
@@ -141,7 +183,8 @@ python scripts/rsl_rl/train_task_d.py \
 
 ## Stage 5: Full
 
-从最好的 Mixed checkpoint 开始完整端到端训练：
+从最好的 Mixed checkpoint 开始完整端到端训练。如果 Mixed 表现不稳定，也可以直接用最好的 Drop 或 Climb checkpoint 进入 Full fine-tuning，再通过视频检查 Push->Climb->Drop 是否连续。
+
 
 ```bash
 python scripts/rsl_rl/train_task_d.py \
