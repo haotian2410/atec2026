@@ -363,6 +363,23 @@ class RewardBoxXInRange(ManagerTermBase):
 
         return reward
 
+def joint_pos_near_soft_limits(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    soft_margin: float = 0.20,
+) -> torch.Tensor:
+    """Penalize controlled joints that approach their soft position limits."""
+    robot = env.scene[asset_cfg.name]
+    joint_ids = asset_cfg.joint_ids if asset_cfg.joint_ids is not None else slice(None)
+    joint_pos = robot.data.joint_pos[:, joint_ids]
+    limits = robot.data.soft_joint_pos_limits[:, joint_ids]
+    lower = limits[..., 0] + float(soft_margin)
+    upper = limits[..., 1] - float(soft_margin)
+    lower_violation = torch.clamp(lower - joint_pos, min=0.0)
+    upper_violation = torch.clamp(joint_pos - upper, min=0.0)
+    return torch.sum(torch.square(lower_violation) + torch.square(upper_violation), dim=1)
+
+
 class RobotForwardProgress(ManagerTermBase):  # 机器人 x 方向“增量进度”奖励，只在本步比上步更靠近终点时给分。
     def __init__(self, cfg, env):  # 初始化奖励项，IsaacLab 会在 reward manager 创建时调用。
         super().__init__(cfg, env)  # 初始化 ManagerTermBase，获得 num_envs、device 等基础字段。
