@@ -8,6 +8,7 @@ import copy
 from isaaclab.utils import configclass
 import atec_rl_lab.tasks.task_d.mdp as atec_mdp
 from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.assets import RigidObjectCfg
@@ -276,6 +277,50 @@ class TaskDEnvB2Cfg(TaskDEnvCfg):
         self.actions.joint_leg.joint_names = leg_joint_names
         self.actions.joint_arm.joint_names = arm_joint_names
         self.actions.joint_wheel = None
+
+
+@configclass
+class TaskDEnvB2PreClimbCfg(TaskDEnvB2Cfg):
+    """Task-D B2Piper scene starting at the recorded pose before manual climb actions."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.events.reset_task_d_pre_climb_pose = EventTerm(
+            func=atec_mdp.reset_task_d_pre_climb_pose,
+            mode="reset",
+            params={
+                "robot_local_pos": (2.886496, -0.881603, 0.475791),
+                "robot_quat_wxyz": (-0.977894, -0.002884, 0.007568, -0.208945),
+                "box_local_pos": (3.870303, -0.870588, -0.018174),
+                "box_quat_wxyz": (0.726671, 0.053058, 0.682466, 0.058081),
+                "robot_joint_pos_by_name": {
+                    "FL_hip_joint": 0.183616,
+                    "FR_hip_joint": -0.188785,
+                    "RL_hip_joint": 0.177537,
+                    "RR_hip_joint": -0.163199,
+                    "FL_thigh_joint": 0.936580,
+                    "FR_thigh_joint": 0.956544,
+                    "RL_thigh_joint": 1.161459,
+                    "RR_thigh_joint": 1.189683,
+                    "arm_joint1": 0.006719,
+                    "FL_calf_joint": -1.620230,
+                    "FR_calf_joint": -1.616397,
+                    "RL_calf_joint": -1.539129,
+                    "RR_calf_joint": -1.529455,
+                    "arm_joint2": -0.000004,
+                    "arm_joint3": 0.000006,
+                    "arm_joint4": 0.000111,
+                    "arm_joint5": 0.008977,
+                    "arm_joint6": -0.000016,
+                    "arm_joint7": 0.000213,
+                    "arm_joint8": -0.000284,
+                },
+                "zero_velocity": True,
+                "debug": False,
+            },
+        )
+        self.events.reset_robot_joints = None
 
 
 @configclass

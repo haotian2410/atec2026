@@ -104,6 +104,65 @@ def _write_b2_standing_joint_state(
             print(f"[TaskD reset joints] env_id={env_id} soft_limits={limit_values}")
 
 
+def reset_task_d_pre_climb_pose(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor | None,
+    robot_local_pos: tuple[float, float, float] = (2.886496, -0.881603, 0.475791),
+    robot_quat_wxyz: tuple[float, float, float, float] = (-0.977894, -0.002884, 0.007568, -0.208945),
+    box_local_pos: tuple[float, float, float] = (3.870303, -0.870588, -0.018174),
+    box_quat_wxyz: tuple[float, float, float, float] = (0.726671, 0.053058, 0.682466, 0.058081),
+    robot_joint_pos_by_name: dict[str, float] | None = None,
+    zero_velocity: bool = True,
+    debug: bool = False,
+    debug_num_envs: int = 4,
+):
+    """Reset Task-D B2Piper to the recorded pose just before the fixed climb action."""
+    if env_ids is None:
+        env_ids = torch.arange(env.scene.num_envs, device=env.device)
+
+    robot: Articulation = env.scene["robot"]
+    box: RigidObject = env.scene["box"]
+    count = len(env_ids)
+
+    robot_local = torch.tensor(robot_local_pos, device=robot.device, dtype=robot.data.root_pos_w.dtype).repeat(count, 1)
+    box_local = torch.tensor(box_local_pos, device=box.device, dtype=box.data.root_pos_w.dtype).repeat(count, 1)
+    robot_world = robot_local + env.scene.env_origins[env_ids]
+    box_world = box_local + env.scene.env_origins[env_ids]
+    robot_quat = torch.tensor(robot_quat_wxyz, device=robot.device, dtype=robot.data.root_quat_w.dtype).repeat(count, 1)
+    box_quat = torch.tensor(box_quat_wxyz, device=box.device, dtype=box.data.root_quat_w.dtype).repeat(count, 1)
+
+    robot.write_root_pose_to_sim(torch.cat([robot_world, robot_quat], dim=-1), env_ids=env_ids)
+    box.write_root_pose_to_sim(torch.cat([box_world, box_quat], dim=-1), env_ids=env_ids)
+
+    if zero_velocity:
+        robot.write_root_velocity_to_sim(torch.zeros((count, 6), device=robot.device), env_ids=env_ids)
+        box.write_root_velocity_to_sim(torch.zeros((count, 6), device=box.device), env_ids=env_ids)
+
+    joint_pos = robot.data.default_joint_pos[env_ids].clone()
+    joint_vel = torch.zeros_like(robot.data.default_joint_vel[env_ids])
+    joint_names = list(getattr(robot, "joint_names", ()))
+    if robot_joint_pos_by_name is not None:
+        for joint_name, target_pos in robot_joint_pos_by_name.items():
+            if joint_name in joint_names:
+                joint_pos[:, joint_names.index(joint_name)] = float(target_pos)
+    robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
+
+    if debug:
+        _debug_reset_positions(
+            env,
+            env_ids,
+            "pre_climb_pose",
+            robot_local,
+            robot_world,
+            box_local,
+            box_world,
+            debug_num_envs,
+        )
+        print(f"[TaskD pre-climb reset] joint_names={joint_names}")
+        if len(env_ids) > 0:
+            print(f"[TaskD pre-climb reset] env_id={int(env_ids[0].item())} joint_pos={joint_pos[0].detach().cpu().tolist()}")
+
+
 def reset_task_d_stage(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor | None,

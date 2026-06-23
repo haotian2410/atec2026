@@ -1,7 +1,7 @@
 import gymnasium as gym
 
 from .terrain import TASK_D_TERRAIN_CFG
-from .env_cfg import TaskDEnvCfg, TaskDEnvB2Cfg, TaskDEnvTron2ALeggedCfg, TaskDEnvTron2AWheelCfg
+from .env_cfg import TaskDEnvCfg, TaskDEnvB2Cfg, TaskDEnvB2PreClimbCfg, TaskDEnvTron2ALeggedCfg, TaskDEnvTron2AWheelCfg
 from .rl_env_cfg import TaskDRLEnvB2Cfg, TaskDRLEnvB2ClimbCfg, TaskDRLEnvB2DropCfg, TaskDRLEnvB2PushCfg, TaskDRLEnvB2MixedCfg, TaskDRLEnvB2FullCfg
 from . import agents
 
@@ -48,6 +48,26 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": f"{__name__}.env_cfg:TaskDEnvB2Cfg"
+    },
+)
+
+
+gym.register(
+    id = "ATEC-TaskD-B2Piper-PreClimb",
+    entry_point="atec_rl_lab.tasks.task_base.envs_base:BaseRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.env_cfg:TaskDEnvB2PreClimbCfg"
+    },
+)
+
+
+gym.register(
+    id = "ATEC-TaskD-SceneE-B2Piper",
+    entry_point="atec_rl_lab.tasks.task_base.envs_base:BaseRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.env_cfg:TaskDEnvB2PreClimbCfg"
     },
 )
 
@@ -122,4 +142,4 @@ gym.register(
     },
 )
 
-__all__ = ['TaskDEnvCfg', 'TaskDEnvB2Cfg', 'TaskDEnvTron2ALeggedCfg', 'TaskDEnvTron2AWheelCfg', 'TaskDRLEnvB2Cfg', 'TaskDRLEnvB2ClimbCfg', 'TaskDRLEnvB2DropCfg', 'TaskDRLEnvB2PushCfg', 'TaskDRLEnvB2MixedCfg', 'TaskDRLEnvB2FullCfg']
+__all__ = ['TaskDEnvCfg', 'TaskDEnvB2Cfg', 'TaskDEnvB2PreClimbCfg', 'TaskDEnvTron2ALeggedCfg', 'TaskDEnvTron2AWheelCfg', 'TaskDRLEnvB2Cfg', 'TaskDRLEnvB2ClimbCfg', 'TaskDRLEnvB2DropCfg', 'TaskDRLEnvB2PushCfg', 'TaskDRLEnvB2MixedCfg', 'TaskDRLEnvB2FullCfg']
